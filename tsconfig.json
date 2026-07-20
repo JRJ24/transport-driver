@@ -2,6 +2,10 @@
   "extends": "expo/tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react",
-    "strict": true
-  }
+    "strict": true,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "index.ts", "app.config.ts"]
 }

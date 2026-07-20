@@ -1,20 +1,101 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import 'react-native-gesture-handler';
+// Registers the background location task at module scope (required by Expo).
+import '@/services/location/background-location.task';
+
+import React, { useEffect } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import {
+  DarkTheme,
+  NavigationContainer,
+  type Theme,
+} from '@react-navigation/native';
+import { colors } from '@/theme/theme';
+import { navigationRef, navigateToRoute } from '@/navigation/ref';
+import { RootNavigator } from '@/navigation/RootNavigator';
+import { useAuth } from '@/store/auth.store';
+import { useOrders } from '@/store/order.store';
+import { useNotifications } from '@/store/notifications.store';
+import type { AppNotification } from '@/types/api';
+import { secureStorage } from '@/services/storage/secure-storage';
+import { socketService } from '@/services/socket/socket.service';
+import { pushNotifications } from '@/services/notifications/push-notifications.service';
+
+const navTheme: Theme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: colors.bg,
+    card: colors.surface,
+    text: colors.text,
+    border: colors.border,
+    primary: colors.primaryBright,
+  },
+};
+
+function AppRoot() {
+  const status = useAuth((s) => s.status);
+  const bootstrap = useAuth((s) => s.bootstrap);
+  const hydrateOrders = useOrders((s) => s.hydrateFromCache);
+  const loadAssignments = useOrders((s) => s.loadAssignments);
+  const prependNotification = useNotifications((s) => s.prepend);
+  const loadNotifications = useNotifications((s) => s.load);
+
+  // One-time setup.
+  useEffect(() => {
+    pushNotifications.configure();
+    void hydrateOrders();
+    void bootstrap();
+
+    const unsubscribe = pushNotifications.addListeners((route) =>
+      navigateToRoute(route),
+    );
+    void pushNotifications.getInitialRoute().then((route) => {
+      if (route) {
+        setTimeout(() => navigateToRoute(route), 800);
+      }
+    });
+    return unsubscribe;
+  }, [bootstrap, hydrateOrders]);
+
+  // Live channel while authenticated.
+  useEffect(() => {
+    if (status !== 'authenticated') {
+      return;
+    }
+    let active = true;
+    void (async () => {
+      const token = await secureStorage.getAccessToken();
+      if (!token || !active) {
+        return;
+      }
+      socketService.connect(token);
+      socketService.on('notification.created', (payload) => {
+        prependNotification(payload as AppNotification);
+      });
+      socketService.on('order.status.changed', () => {
+        void loadAssignments();
+      });
+    })();
+    void loadNotifications();
+
+    return () => {
+      active = false;
+      socketService.disconnect();
+    };
+  }, [status, prependNotification, loadAssignments, loadNotifications]);
+
+  return <RootNavigator />;
+}
 
 export default function App() {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" animated/>
-    </View>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <NavigationContainer ref={navigationRef} theme={navTheme}>
+          <AppRoot />
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
