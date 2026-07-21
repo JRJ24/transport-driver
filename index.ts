@@ -1,5 +1,7 @@
 import { registerRootComponent } from 'expo';
 
+import './src/services/notifications/fcm-background-handler';
+
 import App from './src/App';
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);

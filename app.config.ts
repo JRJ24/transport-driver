@@ -1,12 +1,8 @@
 import type { ExpoConfig, ConfigContext } from 'expo/config';
 
-/**
- * Dynamic Expo config. Google Maps keys and API URLs come from EXPO_PUBLIC_*
- * env vars (per-environment secrets), never hardcoded. google-services.json /
- * GoogleService-Info.plist are added by you locally and referenced here.
- */
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
+
   name: 'transport-driver',
   slug: 'transport-driver',
   version: '1.0.0',
@@ -14,13 +10,24 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   icon: './src/assets/icon.png',
   userInterfaceStyle: 'dark',
   scheme: 'rutardriver',
+
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'do.com.flypack.rutardriver',
+    googleServicesFile: './GoogleService-Info.plist',
+    entitlements: {
+      'aps-environment':
+        process.env.IOS_APS_ENVIRONMENT === 'production'
+          ? 'production'
+          : 'development',
+    },
+
     config: {
       usesNonExemptEncryption: false,
-      googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_API_KEY,
+      googleMapsApiKey:
+        process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_API_KEY,
     },
+
     infoPlist: {
       UIBackgroundModes: ['location', 'remote-notification'],
       NSLocationWhenInUseUsageDescription:
@@ -28,17 +35,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       NSLocationAlwaysAndWhenInUseUsageDescription:
         'Usamos tu ubicación durante un servicio activo, incluso en segundo plano, para el seguimiento de la entrega.',
     },
-    // googleServicesFile: './GoogleService-Info.plist',
   },
+
   android: {
     package: 'do.com.flypack.rutardriver',
+    googleServicesFile: './google-services.json',
     predictiveBackGestureEnabled: false,
+
     adaptiveIcon: {
       backgroundColor: '#0B1220',
       foregroundImage: './src/assets/android-icon-foreground.png',
       backgroundImage: './src/assets/android-icon-background.png',
       monochromeImage: './src/assets/android-icon-monochrome.png',
     },
+
     permissions: [
       'ACCESS_COARSE_LOCATION',
       'ACCESS_FINE_LOCATION',
@@ -47,18 +57,29 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'FOREGROUND_SERVICE_LOCATION',
       'POST_NOTIFICATIONS',
     ],
+
     config: {
       googleMaps: {
-        apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY,
+        apiKey:
+          process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY,
       },
     },
-    // googleServicesFile: './google-services.json',
   },
-  web: {
-    favicon: './src/assets/favicon.png',
-  },
+
   plugins: [
     'expo-secure-store',
+    '@react-native-firebase/app',
+    '@react-native-firebase/messaging',
+    [
+      'expo-build-properties',
+      {
+        ios: {
+          useFrameworks: 'static',
+          forceStaticLinking: ['RNFBApp', 'RNFBMessaging'],
+        },
+      },
+    ],
+
     [
       'expo-location',
       {
@@ -71,15 +92,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         isIosBackgroundLocationEnabled: true,
       },
     ],
-    // Push is delivered via Firebase Cloud Messaging
-    // (@react-native-firebase/messaging), added on the native build.
   ],
-  extra: {
-    EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL,
-    EXPO_PUBLIC_SOCKET_URL: process.env.EXPO_PUBLIC_SOCKET_URL,
-    EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY:
-      process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY,
-    EXPO_PUBLIC_GOOGLE_MAPS_IOS_API_KEY:
-      process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_API_KEY,
+
+extra: {
+  EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL,
+  EXPO_PUBLIC_SOCKET_URL: process.env.EXPO_PUBLIC_SOCKET_URL,
+  EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY:
+    process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY,
+  EXPO_PUBLIC_GOOGLE_MAPS_IOS_API_KEY:
+    process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_API_KEY,
+
+  eas: {
+    projectId: "338328d5-d5d3-4432-ae9d-282ed53a1101",
   },
+},
 });

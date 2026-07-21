@@ -47,8 +47,11 @@ function AppRoot() {
     void hydrateOrders();
     void bootstrap();
 
-    const unsubscribe = pushNotifications.addListeners((route) =>
-      navigateToRoute(route),
+    const unsubscribe = pushNotifications.addListeners(
+      (route) => navigateToRoute(route),
+      () => {
+        void loadNotifications();
+      },
     );
     void pushNotifications.getInitialRoute().then((route) => {
       if (route) {
@@ -56,7 +59,7 @@ function AppRoot() {
       }
     });
     return unsubscribe;
-  }, [bootstrap, hydrateOrders]);
+  }, [bootstrap, hydrateOrders, loadNotifications]);
 
   // Live channel while authenticated.
   useEffect(() => {

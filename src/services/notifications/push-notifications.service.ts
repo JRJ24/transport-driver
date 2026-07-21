@@ -1,44 +1,58 @@
-import { Platform } from 'react-native';
+import { PermissionsAndroid, Platform } from 'react-native';
 import { devicesApi } from '@/api/devices.api';
 import { env } from '@/config/env';
 import type { DevicePlatform, NotificationRoute } from '@/types/api';
 import { appStorage, STORAGE_KEYS } from '@/services/storage/app-storage';
+import { parseNotificationRoute } from '@/services/notifications/notification-routing.service';
 import { uuid } from '@/utils/id';
+
+type MessagingModule = typeof import('@react-native-firebase/messaging');
+type MessagingInstance = ReturnType<MessagingModule['getMessaging']>;
+
+let messagingModulePromise: Promise<MessagingModule | null> | null = null;
+
+async function loadMessaging(): Promise<MessagingModule | null> {
+  messagingModulePromise ??= import('@react-native-firebase/messaging').catch(
+    () => null,
+  );
+  return messagingModulePromise;
+}
 
 /**
  * Push notifications are delivered via Firebase Cloud Messaging.
  *
- * `expo-notifications` was removed because its remote-push APIs crash in Expo Go
- * (SDK 53+). This service is now an FCM-ready seam with no runtime dependency,
- * so the app runs in Expo Go and in dev/production builds without errors.
- *
- * To wire FCM (in a development/production build), install
- * `@react-native-firebase/app` + `@react-native-firebase/messaging` and fill in
- * the marked spots below:
- *   - register(): `messaging().requestPermission()` + `messaging().getToken()`,
- *     then call `this.registerToken(token)`.
- *   - addListeners(): `messaging().onNotificationOpenedApp(...)` and
- *     `messaging().getInitialNotification()` → parseNotificationRoute → onRoute;
- *     `messaging().onTokenRefresh(token => this.registerToken(token))`.
- *
- * `registerToken()` and the backend contract (`POST /devices`) are already in
- * place, so only the native token acquisition is left to plug in.
+ * RNFirebase is loaded lazily so Expo Go degrades to a no-op, while development
+ * and production builds get native FCM tokens and notification tap routing.
  */
 class PushNotificationsService {
   private registeredToken: string | null = null;
 
   configure(): void {
-    // No-op until FCM is wired. (FCM background handler is registered natively.)
+    // Background FCM is registered at module scope from the app entrypoint.
   }
 
-  /**
-   * Acquires the FCM token and registers it with the backend. Returns null for
-   * now (no native token source); wire FCM to make it functional.
-   */
   async register(): Promise<string | null> {
-    // TODO(FCM): const token = await messaging().getToken();
-    //            return this.registerToken(token);
-    return null;
+    try {
+      const messagingModule = await loadMessaging();
+      if (!messagingModule) {
+        return null;
+      }
+
+      const messaging = messagingModule.getMessaging();
+      const hasPermission = await this.requestPermission(
+        messagingModule,
+        messaging,
+      );
+      if (!hasPermission) {
+        return null;
+      }
+
+      await this.registerForRemoteMessages(messagingModule, messaging);
+      const token = await messagingModule.getToken(messaging);
+      return token ? this.registerToken(token) : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Sends an FCM device token to the backend. Call this once FCM is wired. */
@@ -66,17 +80,92 @@ class PushNotificationsService {
     }
   }
 
-  /** Subscribes to notification taps + token refresh. Returns an unsubscribe. */
-  addListeners(_onRoute: (route: NotificationRoute) => void): () => void {
-    // TODO(FCM): wire onNotificationOpenedApp / onTokenRefresh here.
-    return () => undefined;
+  /** Subscribes to foreground messages, notification taps and token refreshes. */
+  addListeners(
+    onRoute: (route: NotificationRoute) => void,
+    onForegroundMessage?: () => void,
+  ): () => void {
+    let disposed = false;
+    const unsubscribers: Array<() => void> = [];
+
+    void loadMessaging().then((messagingModule) => {
+      if (!messagingModule || disposed) {
+        return;
+      }
+
+      const messaging = messagingModule.getMessaging();
+      unsubscribers.push(
+        messagingModule.onMessage(messaging, () => {
+          onForegroundMessage?.();
+        }),
+        messagingModule.onNotificationOpenedApp(messaging, (message) => {
+          const route = parseNotificationRoute(message.data);
+          if (route) {
+            onRoute(route);
+          }
+        }),
+        messagingModule.onTokenRefresh(messaging, (token) => {
+          void this.registerToken(token);
+        }),
+      );
+    });
+
+    return () => {
+      disposed = true;
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
   }
 
   /** Route from the notification that cold-started the app. */
   async getInitialRoute(): Promise<NotificationRoute | null> {
-    // TODO(FCM): return parseNotificationRoute(
-    //   (await messaging().getInitialNotification())?.data);
-    return null;
+    try {
+      const messagingModule = await loadMessaging();
+      if (!messagingModule) {
+        return null;
+      }
+      const message = await messagingModule.getInitialNotification(
+        messagingModule.getMessaging(),
+      );
+      return parseNotificationRoute(message?.data);
+    } catch {
+      return null;
+    }
+  }
+
+  private async requestPermission(
+    messagingModule: MessagingModule,
+    messaging: MessagingInstance,
+  ): Promise<boolean> {
+    if (Platform.OS === 'android') {
+      return this.requestAndroidPermission();
+    }
+
+    const status = await messagingModule.requestPermission(messaging);
+    return (
+      status === messagingModule.AuthorizationStatus.AUTHORIZED ||
+      status === messagingModule.AuthorizationStatus.PROVISIONAL
+    );
+  }
+
+  private async requestAndroidPermission(): Promise<boolean> {
+    const version = Number(Platform.Version);
+    if (!Number.isFinite(version) || version < 33) {
+      return true;
+    }
+
+    const result = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+    );
+    return result === PermissionsAndroid.RESULTS.GRANTED;
+  }
+
+  private async registerForRemoteMessages(
+    messagingModule: MessagingModule,
+    messaging: MessagingInstance,
+  ): Promise<void> {
+    if (Platform.OS === 'ios') {
+      await messagingModule.registerDeviceForRemoteMessages(messaging);
+    }
   }
 
   private async installationId(): Promise<string> {
