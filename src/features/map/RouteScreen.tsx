@@ -3,20 +3,39 @@ import { Alert, Linking, Platform, Pressable, StyleSheet, Text, View } from 'rea
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import { useNavigation } from '@react-navigation/native';
 import { Button, Card, Muted } from '@/components/ui';
+import { deliveryProofsApi } from '@/api/delivery-proofs.api';
+import { incidentsApi } from '@/api/incidents.api';
+import { toErrorMessage } from '@/api/client';
 import { colors, radius, spacing } from '@/theme/theme';
 import { useOrders } from '@/store/order.store';
 import { useTracking } from '@/store/tracking.store';
 import { useConnectivity } from '@/store/connectivity.store';
 import { decodePolyline } from '@/utils/polyline';
-import type { LatLng, OrderStop } from '@/types/api';
+import type { IncidentSeverity, IncidentType, LatLng, OrderStop } from '@/types/api';
+import type { TabParamList } from '@/navigation/types';
 
-function toLatLng(s: OrderStop): LatLng {
-  return { latitude: Number(s.latitude), longitude: Number(s.longitude) };
+const DEFAULT_REGION = {
+  latitude: 18.4861,
+  longitude: -69.9312,
+  latitudeDelta: 0.08,
+  longitudeDelta: 0.08,
+};
+
+function toLatLng(s: OrderStop | undefined): LatLng | null {
+  if (!s || s.latitude === null || s.longitude === null) return null;
+  const latitude = Number(s.latitude);
+  const longitude = Number(s.longitude);
+
+  return Number.isFinite(latitude) && Number.isFinite(longitude)
+    ? { latitude, longitude }
+    : null;
 }
 
 export function RouteScreen() {
   const mapRef = useRef<MapView>(null);
+  const navigation = useNavigation<TabNav>();
   const { activeOrder, route } = useOrders();
   const updateStatus = useOrders((s) => s.updateStatus);
   const clearActive = useOrders((s) => s.clearActive);
@@ -34,9 +53,13 @@ export function RouteScreen() {
     () => (route?.polyline ? decodePolyline(route.polyline) : []),
     [route],
   );
+  const stopPoints = useMemo(
+    () => stops.map(toLatLng).filter((point): point is LatLng => Boolean(point)),
+    [stops],
+  );
 
   const fitToRoute = () => {
-    const points: LatLng[] = polyline.length ? polyline : stops.map(toLatLng);
+    const points: LatLng[] = polyline.length ? [...polyline] : [...stopPoints];
     if (lastFix) {
       points.push(lastFix);
     }
@@ -68,14 +91,15 @@ export function RouteScreen() {
 
   const pickup = stops.find((s) => s.stopType === 'PICKUP') ?? stops[0];
   const dropoff = stops.find((s) => s.stopType === 'DROPOFF') ?? stops[stops.length - 1];
+  const initialPoint = toLatLng(pickup) ?? stopPoints[0] ?? lastFix;
   const initialRegion = {
-    ...toLatLng(pickup ?? stops[0]),
-    latitudeDelta: 0.05,
-    longitudeDelta: 0.05,
+    ...(initialPoint ?? DEFAULT_REGION),
+    latitudeDelta: 0.08,
+    longitudeDelta: 0.08,
   };
 
   const openExternalNav = () => {
-    const dest = dropoff ? toLatLng(dropoff) : lastFix;
+    const dest = toLatLng(dropoff) ?? lastFix;
     if (!dest) {
       return;
     }
@@ -87,15 +111,90 @@ export function RouteScreen() {
     void Linking.openURL(url);
   };
 
+  const reportIncident = (
+    incidentType: IncidentType,
+    severity: IncidentSeverity,
+    title: string,
+    description: string,
+  ) => {
+    const location = currentOrFallback(lastFix, dropoff ?? pickup);
+    if (!location) {
+      Alert.alert('Ubicación requerida', 'No hay ubicación disponible para reportar.');
+      return;
+    }
+
+    setBusy(true);
+    incidentsApi
+      .create({
+        orderId: activeOrder.id,
+        incidentType,
+        severity,
+        title,
+        description,
+        latitude: location.latitude,
+        longitude: location.longitude,
+      })
+      .then(() => Alert.alert('Incidencia enviada', 'La torre de control fue notificada.'))
+      .catch((error) => Alert.alert('No se pudo reportar', toErrorMessage(error)))
+      .finally(() => setBusy(false));
+  };
+
+  const openIncidentMenu = () => {
+    Alert.alert('Reportar incidencia', 'Selecciona el tipo de novedad.', [
+      {
+        text: 'Cliente ausente',
+        onPress: () =>
+          reportIncident(
+            'CUSTOMER_ABSENT',
+            'MEDIUM',
+            'Cliente ausente',
+            'El receptor no se encuentra disponible en el punto de entrega.',
+          ),
+      },
+      {
+        text: 'Tráfico / retraso',
+        onPress: () =>
+          reportIncident(
+            'DELAY',
+            'LOW',
+            'Retraso en ruta',
+            'El conductor reporta retraso por tráfico o condiciones de vía.',
+          ),
+      },
+      {
+        text: 'Daño',
+        onPress: () =>
+          reportIncident(
+            'DAMAGE',
+            'HIGH',
+            'Daño reportado',
+            'El conductor reporta posible daño o novedad con la carga.',
+          ),
+      },
+    ]);
+  };
+
   const onComplete = async () => {
     setBusy(true);
     try {
+      const proofs = await deliveryProofsApi.list(activeOrder.id);
+      if (proofs.length === 0) {
+        Alert.alert(
+          'Evidencia requerida',
+          'Captura foto y firma antes de completar la entrega.',
+          [
+            { text: 'Luego', style: 'cancel' },
+            { text: 'Capturar', onPress: () => navigation.navigate('Evid') },
+          ],
+        );
+        return;
+      }
       await updateStatus(activeOrder.id, 'DELIVERED');
       await stop();
       await clearActive();
       Alert.alert('Servicio completado', 'La entrega fue registrada.');
     } catch {
-      Alert.alert('Error', 'No se pudo completar. Se reintentará al sincronizar.');
+      Alert.alert('Error', 'No se pudo completar. Verifica conexión y evidencia.');
     } finally {
       setBusy(false);
     }
@@ -128,23 +227,28 @@ export function RouteScreen() {
           {polyline.length > 1 && (
             <Polyline coordinates={polyline} strokeColor={colors.primaryBright} strokeWidth={5} />
           )}
-          {stops.map((s) => (
-            <Marker key={s.id} coordinate={toLatLng(s)} title={s.addressLine}>
-              <View
-                style={[
-                  styles.marker,
-                  {
-                    backgroundColor:
-                      s.stopType === 'PICKUP'
-                        ? colors.pickup
-                        : s.stopType === 'DROPOFF'
-                          ? colors.delivery
-                          : colors.textMuted,
-                  },
-                ]}
-              />
-            </Marker>
-          ))}
+          {stops.map((s) => {
+            const coordinate = toLatLng(s);
+            if (!coordinate) return null;
+
+            return (
+              <Marker key={s.id} coordinate={coordinate} title={s.addressLine}>
+                <View
+                  style={[
+                    styles.marker,
+                    {
+                      backgroundColor:
+                        s.stopType === 'PICKUP'
+                          ? colors.pickup
+                          : s.stopType === 'DROPOFF'
+                            ? colors.delivery
+                            : colors.textMuted,
+                    },
+                  ]}
+                />
+              </Marker>
+            );
+          })}
           {lastFix && (
             <Marker coordinate={lastFix} title="Mi ubicación" anchor={{ x: 0.5, y: 0.5 }}>
               <View style={styles.vehicle}>
@@ -191,13 +295,29 @@ export function RouteScreen() {
             label="Reportar"
             tone="danger"
             style={styles.flex}
-            onPress={() => Alert.alert('Reportar incidencia', 'Cliente ausente · Daño · Tráfico')}
+            onPress={openIncidentMenu}
           />
         </View>
         <Button label="Completar entrega" tone="success" loading={busy} onPress={onComplete} />
       </Card>
     </SafeAreaView>
   );
+}
+
+type TabNav = { navigate: (screen: keyof TabParamList) => void };
+
+function currentOrFallback(
+  lastFix: LatLng | null,
+  stop: OrderStop | undefined,
+): LatLng | null {
+  if (lastFix) return lastFix;
+  if (!stop || stop.latitude === null || stop.longitude === null) return null;
+  const latitude = Number(stop?.latitude);
+  const longitude = Number(stop?.longitude);
+
+  return Number.isFinite(latitude) && Number.isFinite(longitude)
+    ? { latitude, longitude }
+    : null;
 }
 
 const styles = StyleSheet.create({

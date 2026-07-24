@@ -9,6 +9,7 @@ import type {
   TransportOrder,
 } from '@/types/api';
 import { appStorage, STORAGE_KEYS } from '@/services/storage/app-storage';
+import { socketService } from '@/services/socket/socket.service';
 
 interface OrderState {
   assignments: Assignment[];
@@ -49,7 +50,12 @@ export const useOrders = create<OrderState>((set, get) => ({
     set({ loadingOrder: true, error: null });
     try {
       const order = await ordersApi.detail(orderId);
+      const previousOrderId = get().activeOrder?.id;
+      if (previousOrderId && previousOrderId !== orderId) {
+        socketService.leaveOrder(previousOrderId);
+      }
       set({ activeOrder: order });
+      socketService.joinOrder(orderId);
       await appStorage.set(STORAGE_KEYS.activeOrder, order);
 
       const route = await ordersApi.route(orderId).catch(() => null);
@@ -97,6 +103,10 @@ export const useOrders = create<OrderState>((set, get) => ({
   },
 
   async clearActive() {
+    const orderId = get().activeOrder?.id;
+    if (orderId) {
+      socketService.leaveOrder(orderId);
+    }
     set({ activeOrder: null, route: null });
     await appStorage.remove(STORAGE_KEYS.activeOrder);
     await appStorage.remove(STORAGE_KEYS.activeRoute);

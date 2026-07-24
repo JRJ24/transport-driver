@@ -125,10 +125,14 @@ export function toErrorMessage(error: unknown): string {
     return error.message;
   }
   if (axios.isAxiosError(error)) {
-    const data = error.response?.data as ApiResponse<unknown> | undefined;
-    if (data && !data.success) {
+    const data = error.response?.data as
+      | ApiResponse<unknown>
+      | { message?: string }
+      | undefined;
+    if (data && 'success' in data && !data.success) {
       return data.error.message;
     }
+    if (data && 'message' in data && data.message) return data.message;
     return error.message;
   }
   return error instanceof Error ? error.message : 'Error inesperado';

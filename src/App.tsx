@@ -38,6 +38,7 @@ function AppRoot() {
   const bootstrap = useAuth((s) => s.bootstrap);
   const hydrateOrders = useOrders((s) => s.hydrateFromCache);
   const loadAssignments = useOrders((s) => s.loadAssignments);
+  const selectOrder = useOrders((s) => s.selectOrder);
   const prependNotification = useNotifications((s) => s.prepend);
   const loadNotifications = useNotifications((s) => s.load);
 
@@ -76,8 +77,16 @@ function AppRoot() {
       socketService.on('notification.created', (payload) => {
         prependNotification(payload as AppNotification);
       });
-      socketService.on('order.status.changed', () => {
+      socketService.on('order.status.changed', (payload) => {
         void loadAssignments();
+        const activeOrder = useOrders.getState().activeOrder;
+        const changedOrderId =
+          payload && typeof payload === 'object' && 'orderId' in payload
+            ? String(payload.orderId)
+            : null;
+        if (activeOrder && changedOrderId === activeOrder.id) {
+          void selectOrder(activeOrder.id);
+        }
       });
     })();
     void loadNotifications();
@@ -86,7 +95,7 @@ function AppRoot() {
       active = false;
       socketService.disconnect();
     };
-  }, [status, prependNotification, loadAssignments, loadNotifications]);
+  }, [status, prependNotification, loadAssignments, loadNotifications, selectOrder]);
 
   return <RootNavigator />;
 }

@@ -92,6 +92,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         isIosBackgroundLocationEnabled: true,
       },
     ],
+    [
+      'expo-image-picker',
+      {
+        cameraPermission:
+          'Permite que RUTA RD Driver tome fotos como evidencia de entrega.',
+        photosPermission:
+          'Permite adjuntar fotos de evidencia desde tu galería cuando sea necesario.',
+        microphonePermission: false,
+      },
+    ],
   ],
 
 extra: {

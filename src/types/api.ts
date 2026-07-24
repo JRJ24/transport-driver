@@ -30,6 +30,11 @@ export type Role = 'ADMIN' | 'OPERATOR' | 'DRIVER' | 'CUSTOMER';
 export type DriverStatus = 'AVAILABLE' | 'BUSY' | 'OFFLINE' | 'SUSPENDED' | 'VACATION';
 export type OrderStatus =
   | 'DRAFT'
+  | 'PENDING_QUOTE'
+  | 'PENDING_CUSTOMER_CONFIRMATION'
+  | 'PENDING_PAYMENT'
+  | 'CONFIRMED'
+  | 'ASSIGNING_DRIVER'
   | 'REQUESTED'
   | 'ASSIGNED'
   | 'ACCEPTED'
@@ -46,6 +51,17 @@ export type AssignmentStatus =
 export type StopType = 'PICKUP' | 'DROPOFF' | 'INTERMEDIATE';
 export type TrackingSessionStatus = 'ACTIVE' | 'ENDED' | 'INTERRUPTED';
 export type DevicePlatform = 'ANDROID' | 'IOS' | 'WEB';
+export type ProofType = 'PHOTO' | 'SIGNATURE' | 'QR' | 'CODE' | 'MIXED';
+export type ValidationStatus = 'PENDING' | 'VALIDATED' | 'REJECTED';
+export type IncidentType =
+  | 'DELAY'
+  | 'DAMAGE'
+  | 'CUSTOMER_ABSENT'
+  | 'WRONG_ADDRESS'
+  | 'VEHICLE_PROBLEM'
+  | 'OTHER';
+export type IncidentSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type IncidentStatus = 'OPEN' | 'IN_REVIEW' | 'RESOLVED' | 'CLOSED';
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 export interface AuthUser {
@@ -119,8 +135,8 @@ export interface OrderStop {
   addressLine: string;
   city: string;
   province: string;
-  latitude: number | string;
-  longitude: number | string;
+  latitude: number | string | null;
+  longitude: number | string | null;
   instructions?: string | null;
   arrivedAt?: string | null;
   completedAt?: string | null;
@@ -144,8 +160,9 @@ export interface TransportOrder {
   scheduleAt?: string | null;
   pickupAt?: string | null;
   deliveredAt?: string | null;
-  distanceKm: number | string;
-  estimatedDurationMin: number;
+  distanceKm: number | string | null;
+  estimatedDurationMin: number | null;
+  totalAmount?: number | string | null;
   notes?: string;
   orderStops?: OrderStop[];
   orderItems?: OrderItem[];
@@ -246,6 +263,72 @@ export interface AppNotification {
   data: Record<string, unknown>;
   readAt?: string | null;
   createdAt: string;
+}
+
+// ── Evidence / attachments / incidents ──────────────────────────────────────
+export interface Attachment {
+  id: string;
+  entityType: string;
+  entityId: string;
+  fileName: string;
+  fileUrl: string;
+  fileSize: number;
+  mimeType: string;
+  uploadedBy: string;
+  createdAt: string;
+}
+
+export interface UploadedFileInfo {
+  fieldName?: string;
+  key: string;
+  fileName: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  url: string;
+}
+
+export interface UploadedAttachment {
+  file: UploadedFileInfo;
+  attachment: Attachment | null;
+}
+
+export interface DeliveryProof {
+  id: string;
+  orderId: string;
+  proofType: ProofType;
+  recipientName: string;
+  recipientDocument: string;
+  notes?: string | null;
+  latitude: number | string;
+  longitude: number | string;
+  capturedBy: string;
+  capturedAt: string;
+  validatedAt: string;
+  validationStatus: ValidationStatus;
+}
+
+export interface Signature {
+  id: string;
+  proofId: string;
+  signatureUrl: string;
+  signerName: string;
+  signedAt: string;
+}
+
+export interface Incident {
+  id: string;
+  orderId: string;
+  reportedBy: string;
+  incidentType: IncidentType;
+  severity: IncidentSeverity;
+  title: string;
+  description: string;
+  status: IncidentStatus;
+  latitude: number | string;
+  longitude: number | string;
+  reportedAt: string;
+  resolvedAt?: string | null;
 }
 
 /** Safe navigation payload carried inside a push notification's `data`. */
