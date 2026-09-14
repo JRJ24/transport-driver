@@ -306,6 +306,8 @@ export interface DeliveryProof {
   capturedAt: string;
   validatedAt: string;
   validationStatus: ValidationStatus;
+  /** `GET /delivery-proofs` incluye las firmas de cada prueba. */
+  signatures?: Signature[];
 }
 
 export interface Signature {
@@ -336,4 +338,22 @@ export interface NotificationRoute {
   type: string;
   screen?: string;
   orderId?: string;
+}
+
+/** Eventos de orden que registra el conductor desde la ruta. */
+export type OrderEventType =
+  | 'ARRIVED'
+  | 'PICKED_UP'
+  | 'DELIVERED'
+  | 'DELAYED'
+  | 'CANCELLED';
+
+export interface OrderEvent {
+  id: string;
+  orderId: string;
+  eventType: OrderEventType;
+  description: string | null;
+  latitude: number | string | null;
+  longitude: number | string | null;
+  createdAt: string;
 }

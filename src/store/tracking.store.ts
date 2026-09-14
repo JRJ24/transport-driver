@@ -15,12 +15,39 @@ interface TrackingState {
   error: string | null;
 
   start: (orderId: string) => Promise<boolean>;
+  resume: (orderId: string) => Promise<void>;
   stop: () => Promise<void>;
   flush: () => Promise<void>;
   refreshPending: () => Promise<void>;
 }
 
 let flushTimer: ReturnType<typeof setInterval> | null = null;
+
+type SetState = (partial: Partial<TrackingState>) => void;
+type GetState = () => TrackingState;
+
+/** Engancha el GPS a una sesion, venga de `start()` o de `resume()`. */
+async function attach(
+  session: TrackingSession,
+  set: SetState,
+  get: GetState,
+): Promise<void> {
+  set({ session, isTracking: true });
+
+  await locationService.start(session, (loc) => {
+    set({
+      lastFix: {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+      },
+      lastFixAt: new Date(loc.timestamp).toISOString(),
+    });
+  });
+
+  flushTimer ??= setInterval(() => {
+    void get().flush();
+  }, 15000);
+}
 
 export const useTracking = create<TrackingState>((set, get) => ({
   session: null,
@@ -34,25 +61,32 @@ export const useTracking = create<TrackingState>((set, get) => ({
     set({ error: null });
     try {
       const session = await trackingApi.createSession(orderId);
-      set({ session, isTracking: true });
-
-      await locationService.start(session, (loc) => {
-        set({
-          lastFix: {
-            latitude: loc.coords.latitude,
-            longitude: loc.coords.longitude,
-          },
-          lastFixAt: new Date(loc.timestamp).toISOString(),
-        });
-      });
-
-      flushTimer ??= setInterval(() => {
-        void get().flush();
-      }, 15000);
+      await attach(session, set, get);
       return true;
     } catch (error) {
       set({ isTracking: false, error: toErrorMessage(error) });
       return false;
+    }
+  },
+
+  /**
+   * Recupera la sesion de tracking tras un reinicio de la app.
+   *
+   * El task de background sobrevive a que el SO mate la app y sigue encolando
+   * puntos, pero la sesion solo vivia en memoria: la UI decia «GPS en pausa» y
+   * «Completar entrega» ya no llamaba a `stop()`, asi que la sesion se quedaba
+   * ACTIVE para siempre en la base de datos.
+   */
+  async resume(orderId) {
+    try {
+      const session = await trackingApi.activeSession(orderId);
+      if (!session) {
+        return;
+      }
+
+      await attach(session, set, get);
+    } catch {
+      // Sin red al arrancar: el task de background sigue encolando igual.
     }
   },
 

@@ -1,5 +1,5 @@
 import { http, unwrap } from './client';
-import type { ApiResponse, UploadedAttachment } from '@/types/api';
+import type { ApiResponse, Attachment, UploadedAttachment } from '@/types/api';
 
 export interface UploadableFile {
   uri: string;
@@ -14,6 +14,13 @@ export interface UploadAttachmentsInput {
 }
 
 export const attachmentsApi = {
+  async list(entityType?: string, entityId?: string): Promise<Attachment[]> {
+    const res = await http.get<ApiResponse<Attachment[]>>('/attachments', {
+      params: { entityType, entityId },
+    });
+    return unwrap(res.data);
+  },
+
   async upload(input: UploadAttachmentsInput): Promise<UploadedAttachment[]> {
     const form = new FormData();
     if (input.entityType) form.append('entityType', input.entityType);

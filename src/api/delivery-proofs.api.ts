@@ -1,10 +1,17 @@
 import { http, unwrap } from './client';
+import { attachmentsApi } from './attachments.api';
 import type {
   ApiResponse,
+  Attachment,
   DeliveryProof,
   ProofType,
   Signature,
 } from '@/types/api';
+
+export interface EvidenceBundleItem {
+  proof: DeliveryProof;
+  attachments: Attachment[];
+}
 
 export interface CreateDeliveryProofInput {
   orderId: string;
@@ -47,5 +54,18 @@ export const deliveryProofsApi = {
       input,
     );
     return unwrap(res.data);
+  },
+
+  /** Pruebas con sus adjuntos, que es lo que valida el backend al entregar. */
+  async bundle(orderId: string): Promise<EvidenceBundleItem[]> {
+    const proofs = await deliveryProofsApi.list(orderId);
+    const attachments = await Promise.all(
+      proofs.map((proof) => attachmentsApi.list('DeliveryProof', proof.id)),
+    );
+
+    return proofs.map((proof, index) => ({
+      proof,
+      attachments: attachments[index] ?? [],
+    }));
   },
 };

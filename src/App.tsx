@@ -15,6 +15,7 @@ import { navigationRef, navigateToRoute } from '@/navigation/ref';
 import { RootNavigator } from '@/navigation/RootNavigator';
 import { useAuth } from '@/store/auth.store';
 import { useOrders } from '@/store/order.store';
+import { useTracking } from '@/store/tracking.store';
 import { useNotifications } from '@/store/notifications.store';
 import type { AppNotification } from '@/types/api';
 import { secureStorage } from '@/services/storage/secure-storage';
@@ -45,7 +46,14 @@ function AppRoot() {
   // One-time setup.
   useEffect(() => {
     pushNotifications.configure();
-    void hydrateOrders();
+    // Si el SO mato la app durante un servicio, el task de background sigue
+    // encolando puntos: hay que volver a enganchar la sesion a la UI.
+    void hydrateOrders().then(() => {
+      const active = useOrders.getState().activeOrder;
+      if (active) {
+        void useTracking.getState().resume(active.id);
+      }
+    });
     void bootstrap();
 
     const unsubscribe = pushNotifications.addListeners(

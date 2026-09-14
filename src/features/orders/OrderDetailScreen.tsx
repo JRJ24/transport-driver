@@ -9,6 +9,7 @@ import { useTracking } from '@/store/tracking.store';
 import { locationPermissions } from '@/services/location/location-permissions.service';
 import type { InicioStackParamList, TabParamList } from '@/navigation/types';
 import type { OrderStop } from '@/types/api';
+import { orderStatusLabels } from '@/constants/status.constants';
 
 const stopLabel: Record<OrderStop['stopType'], string> = {
   PICKUP: 'Recogida',
@@ -78,7 +79,9 @@ export function OrderDetailScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <Text style={styles.title}>{activeOrder?.orderCode ?? orderId}</Text>
-          <Pill tone="primary">{activeOrder?.status ?? '—'}</Pill>
+          <Pill tone="primary">
+            {activeOrder ? orderStatusLabels[activeOrder.status] : '—'}
+          </Pill>
         </View>
 
         <Card>

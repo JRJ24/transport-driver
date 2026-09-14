@@ -6,7 +6,9 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useNavigation } from '@react-navigation/native';
 import { Button, Card, Muted } from '@/components/ui';
 import { deliveryProofsApi } from '@/api/delivery-proofs.api';
+import { orderEventsApi } from '@/api/order-events.api';
 import { incidentsApi } from '@/api/incidents.api';
+import { evidenceStatus, missingEvidenceMessage } from '@/utils/evidence';
 import { toErrorMessage } from '@/api/client';
 import { colors, radius, spacing } from '@/theme/theme';
 import { useOrders } from '@/store/order.store';
@@ -177,24 +179,44 @@ export function RouteScreen() {
   const onComplete = async () => {
     setBusy(true);
     try {
-      const proofs = await deliveryProofsApi.list(activeOrder.id);
-      if (proofs.length === 0) {
-        Alert.alert(
-          'Evidencia requerida',
-          'Captura foto y firma antes de completar la entrega.',
-          [
-            { text: 'Luego', style: 'cancel' },
-            { text: 'Capturar', onPress: () => navigation.navigate('Evid') },
-          ],
-        );
+      const evidence = evidenceStatus(await deliveryProofsApi.bundle(activeOrder.id));
+      if (!evidence.ready) {
+        Alert.alert('Evidencia incompleta', missingEvidenceMessage(evidence), [
+          { text: 'Luego', style: 'cancel' },
+          { text: 'Capturar', onPress: () => navigation.navigate('Evid') },
+        ]);
         return;
       }
       await updateStatus(activeOrder.id, 'DELIVERED');
       await stop();
       await clearActive();
       Alert.alert('Servicio completado', 'La entrega fue registrada.');
-    } catch {
-      Alert.alert('Error', 'No se pudo completar. Verifica conexión y evidencia.');
+    } catch (error) {
+      Alert.alert('No se pudo completar', toErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * D3: «Llegué» solo vaciaba la cola de GPS y no registraba nada.
+   * Ahora deja constancia en la bitacora de la orden, ademas de sincronizar.
+   */
+  const onArrived = async () => {
+    setBusy(true);
+    try {
+      const where = currentOrFallback(lastFix, dropoff ?? pickup);
+      await orderEventsApi.create({
+        orderId: activeOrder.id,
+        eventType: 'ARRIVED',
+        description: 'El conductor llego al punto de entrega.',
+        latitude: where?.latitude,
+        longitude: where?.longitude,
+      });
+      await flush();
+      Alert.alert('Llegada registrada', 'La torre de control fue notificada.');
+    } catch (error) {
+      Alert.alert('No se pudo registrar la llegada', toErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -289,7 +311,7 @@ export function RouteScreen() {
             label="Llegué"
             tone="primary"
             style={styles.flex}
-            onPress={() => void flush()}
+            onPress={() => void onArrived()}
           />
           <Button
             label="Reportar"

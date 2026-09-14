@@ -14,7 +14,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'do.com.flypack.rutardriver',
-    googleServicesFile: './GoogleService-Info.plist',
+    // `google-services.json` y el .plist estan en .gitignore, asi que EAS
+    // Build no los recibe del repo: llegan como variable de tipo archivo.
+    googleServicesFile:
+      process.env.GOOGLE_SERVICES_PLIST ?? './GoogleService-Info.plist',
     entitlements: {
       'aps-environment':
         process.env.IOS_APS_ENVIRONMENT === 'production'
@@ -39,7 +42,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 
   android: {
     package: 'do.com.flypack.rutardriver',
-    googleServicesFile: './google-services.json',
+    googleServicesFile:
+      process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
     predictiveBackGestureEnabled: false,
 
     adaptiveIcon: {

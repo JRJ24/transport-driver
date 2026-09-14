@@ -17,6 +17,7 @@ import { useOrders } from '@/store/order.store';
 import { useNotifications } from '@/store/notifications.store';
 import type { Assignment } from '@/types/api';
 import type { InicioStackParamList } from '@/navigation/types';
+import { assignmentStatusLabels } from '@/constants/status.constants';
 
 type Nav = NativeStackNavigationProp<InicioStackParamList, 'Tasks'>;
 
@@ -119,7 +120,7 @@ export function TasksScreen() {
                         : 'neutral'
                   }
                 >
-                  {a.assignmentStatus}
+                  {assignmentStatusLabels[a.assignmentStatus]}
                 </Pill>
               </View>
               <Muted>{firstStop(a)}</Muted>

@@ -6,6 +6,7 @@ import axios, {
 import { env } from '@/config/env';
 import type { ApiResponse, AuthTokens } from '@/types/api';
 import { secureStorage } from '@/services/storage/secure-storage';
+import { useConnectivity } from '@/store/connectivity.store';
 
 /**
  * Central HTTP client. Attaches the bearer token, unwraps the `{success,data}`
@@ -33,9 +34,23 @@ class ApiClient {
       return config;
     });
 
+    // Toda respuesta del servidor prueba que hay red; un error sin `response`
+    // es un fallo de transporte. Antes el indicador dependia de `flush()`, que
+    // no llama a nadie cuando la cola esta vacia: tras un unico fallo se
+    // quedaba en «Sin conexion» para siempre.
     this.instance.interceptors.response.use(
-      (response) => response,
-      (error: AxiosError) => this.handleError(error),
+      (response) => {
+        useConnectivity.getState().markSynced();
+        return response;
+      },
+      (error: AxiosError) => {
+        if (!error.response) {
+          useConnectivity.getState().setOnline(false);
+        } else {
+          useConnectivity.getState().markSynced();
+        }
+        return this.handleError(error);
+      },
     );
   }
 
