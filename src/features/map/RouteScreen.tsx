@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -15,6 +15,11 @@ import { useOrders } from '@/store/order.store';
 import { useTracking } from '@/store/tracking.store';
 import { useConnectivity } from '@/store/connectivity.store';
 import { decodePolyline } from '@/utils/polyline';
+import {
+  googleMapsNavigationUrl,
+  nextStopForDriver,
+  wazeNavigationUrl,
+} from '@/utils/navigation';
 import type { IncidentSeverity, IncidentType, LatLng, OrderStop } from '@/types/api';
 import type { TabParamList } from '@/navigation/types';
 
@@ -100,17 +105,26 @@ export function RouteScreen() {
     longitudeDelta: 0.08,
   };
 
+  const nextStop = nextStopForDriver(activeOrder);
+
+  /**
+   * «Como llegar»: apunta a la siguiente parada del viaje, no al destino final.
+   * Al empezar hay que ir a recoger, no a entregar.
+   */
   const openExternalNav = () => {
-    const dest = toLatLng(dropoff) ?? lastFix;
+    const dest = toLatLng(nextStop ?? undefined) ?? lastFix;
     if (!dest) {
+      Alert.alert('Sin coordenadas', 'Esa parada no tiene ubicacion registrada.');
       return;
     }
-    const url = Platform.select({
-      ios: `maps://?daddr=${dest.latitude},${dest.longitude}`,
-      android: `google.navigation:q=${dest.latitude},${dest.longitude}`,
-      default: `https://www.google.com/maps/dir/?api=1&destination=${dest.latitude},${dest.longitude}`,
-    });
-    void Linking.openURL(url);
+
+    const target = nextStop?.stopType === 'PICKUP' ? 'la recogida' : 'la entrega';
+
+    Alert.alert('Como llegar', `Navegar hasta ${target}.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Google Maps', onPress: () => void Linking.openURL(googleMapsNavigationUrl(dest)) },
+      { text: 'Waze', onPress: () => void Linking.openURL(wazeNavigationUrl(dest)) },
+    ]);
   };
 
   const reportIncident = (

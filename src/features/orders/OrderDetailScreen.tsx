@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { Button, Card, Eyebrow, Muted, Pill } from '@/components/ui';
@@ -10,6 +10,11 @@ import { locationPermissions } from '@/services/location/location-permissions.se
 import type { InicioStackParamList, TabParamList } from '@/navigation/types';
 import type { OrderStop } from '@/types/api';
 import { orderStatusLabels } from '@/constants/status.constants';
+import {
+  googleMapsNavigationUrl,
+  nextStopForDriver,
+  wazeNavigationUrl,
+} from '@/utils/navigation';
 
 const stopLabel: Record<OrderStop['stopType'], string> = {
   PICKUP: 'Recogida',
@@ -39,6 +44,23 @@ export function OrderDetailScreen() {
   const stops = [...(activeOrder?.orderStops ?? [])].sort(
     (a, b) => a.sequence - b.sequence,
   );
+  const nextStop = nextStopForDriver(activeOrder);
+
+  /** Abre la navegacion del telefono hacia una parada concreta. */
+  const navigateToStop = (stop: OrderStop) => {
+    if (stop.latitude === null || stop.longitude === null) {
+      Alert.alert('Sin coordenadas', 'Esa parada no tiene ubicacion registrada.');
+      return;
+    }
+
+    const dest = { latitude: Number(stop.latitude), longitude: Number(stop.longitude) };
+
+    Alert.alert('Como llegar', stop.addressLine, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Google Maps', onPress: () => void Linking.openURL(googleMapsNavigationUrl(dest)) },
+      { text: 'Waze', onPress: () => void Linking.openURL(wazeNavigationUrl(dest)) },
+    ]);
+  };
   const items = activeOrder?.orderItems ?? [];
 
   async function onStart() {
@@ -120,6 +142,11 @@ export function OrderDetailScreen() {
             <Muted>{`${s.city}, ${s.province}`}</Muted>
             <Muted>{`Contacto: ${s.contactName} · ${s.contactPhone}`}</Muted>
             {s.instructions ? <Muted>{s.instructions}</Muted> : null}
+            <Button
+              label={s.id === nextStop?.id ? 'Como llegar (siguiente)' : 'Como llegar'}
+              tone={s.id === nextStop?.id ? 'primary' : 'neutral'}
+              onPress={() => navigateToStop(s)}
+            />
           </Card>
         ))}
 
