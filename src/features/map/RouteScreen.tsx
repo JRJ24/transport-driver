@@ -43,9 +43,10 @@ function toLatLng(s: OrderStop | undefined): LatLng | null {
 export function RouteScreen() {
   const mapRef = useRef<MapView>(null);
   const navigation = useNavigation<TabNav>();
-  const { activeOrder, route } = useOrders();
+  const { activeOrder, route, approach } = useOrders();
   const updateStatus = useOrders((s) => s.updateStatus);
   const clearActive = useOrders((s) => s.clearActive);
+  const refreshApproach = useOrders((s) => s.refreshApproach);
   const { isTracking, lastFix, lastFixAt, pendingCount, stop, flush } = useTracking();
   const online = useConnectivity((s) => s.online);
   const lastSyncAt = useConnectivity((s) => s.lastSyncAt);
@@ -64,9 +65,16 @@ export function RouteScreen() {
     () => stops.map(toLatLng).filter((point): point is LatLng => Boolean(point)),
     [stops],
   );
+  // Tramo desde donde esta el conductor hasta la parada que le toca. Antes su
+  // marcador quedaba suelto, sin nada que lo uniera a la ruta.
+  const approachLine = useMemo(
+    () => (approach?.route?.polyline ? decodePolyline(approach.route.polyline) : []),
+    [approach],
+  );
 
   const fitToRoute = () => {
     const points: LatLng[] = polyline.length ? [...polyline] : [...stopPoints];
+    points.push(...approachLine);
     if (lastFix) {
       points.push(lastFix);
     }
@@ -82,7 +90,21 @@ export function RouteScreen() {
     const t = setTimeout(fitToRoute, 500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route, activeOrder]);
+  }, [route, activeOrder, approach]);
+
+  /*
+   * El tramo caduca a medida que el conductor avanza, asi que se refresca
+   * mientras la pantalla esta abierta. 20 s no cuesta: el backend solo llama a
+   * Google cuando el conductor se alejo mas de 200 m del ultimo calculo.
+   */
+  useEffect(() => {
+    if (!activeOrder) {
+      return undefined;
+    }
+
+    const timer = setInterval(() => void refreshApproach(), 20_000);
+    return () => clearInterval(timer);
+  }, [activeOrder, refreshApproach]);
 
   if (!activeOrder) {
     return (
@@ -260,6 +282,14 @@ export function RouteScreen() {
           initialRegion={initialRegion}
           showsUserLocation={false}
         >
+          {approachLine.length > 1 && (
+            <Polyline
+              coordinates={approachLine}
+              strokeColor={colors.textMuted}
+              strokeWidth={4}
+              lineDashPattern={[10, 8]}
+            />
+          )}
           {polyline.length > 1 && (
             <Polyline coordinates={polyline} strokeColor={colors.primaryBright} strokeWidth={5} />
           )}
@@ -313,6 +343,13 @@ export function RouteScreen() {
             {pendingCount > 0 ? ` · ${pendingCount} por sincronizar` : ''}
           </Muted>
         </View>
+        {approach?.route ? (
+          <Muted>
+            {`${approach.route.durationMin} min · ${approach.route.distanceKm} km hasta ${
+              approach.targetStopType === 'PICKUP' ? 'la recogida' : 'la entrega'
+            }`}
+          </Muted>
+        ) : null}
         <Muted>
           {lastFixAt
             ? `Última ubicación: ${new Date(lastFixAt).toLocaleTimeString()}`

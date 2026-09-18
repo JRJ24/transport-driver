@@ -3,6 +3,7 @@ import type {
   ApiResponse,
   Assignment,
   ComputedRoute,
+  OrderApproachRoute,
   OrderStatus,
   TransportOrder,
 } from '@/types/api';
@@ -16,6 +17,14 @@ export const ordersApi = {
   async route(orderId: string): Promise<ComputedRoute> {
     const res = await http.get<ApiResponse<ComputedRoute>>(
       `/routes/orders/${orderId}`,
+    );
+    return unwrap(res.data);
+  },
+
+  /** Leg from where the driver is to the stop they are heading to. */
+  async approach(orderId: string): Promise<OrderApproachRoute> {
+    const res = await http.get<ApiResponse<OrderApproachRoute>>(
+      `/routes/orders/${orderId}/approach`,
     );
     return unwrap(res.data);
   },

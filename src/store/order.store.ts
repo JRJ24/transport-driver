@@ -5,6 +5,7 @@ import { toErrorMessage } from '@/api/client';
 import type {
   Assignment,
   ComputedRoute,
+  OrderApproachRoute,
   OrderStatus,
   TransportOrder,
 } from '@/types/api';
@@ -15,6 +16,8 @@ interface OrderState {
   assignments: Assignment[];
   activeOrder: TransportOrder | null;
   route: ComputedRoute | null;
+  /** Tramo del conductor a la parada. No se persiste: caduca al moverse. */
+  approach: OrderApproachRoute | null;
   loadingList: boolean;
   loadingOrder: boolean;
   error: string | null;
@@ -22,6 +25,7 @@ interface OrderState {
   loadAssignments: () => Promise<void>;
   selectOrder: (orderId: string) => Promise<void>;
   refreshRoute: () => Promise<void>;
+  refreshApproach: () => Promise<void>;
   accept: (orderId: string) => Promise<void>;
   updateStatus: (orderId: string, status: OrderStatus) => Promise<void>;
   hydrateFromCache: () => Promise<void>;
@@ -32,6 +36,7 @@ export const useOrders = create<OrderState>((set, get) => ({
   assignments: [],
   activeOrder: null,
   route: null,
+  approach: null,
   loadingList: false,
   loadingOrder: false,
   error: null,
@@ -63,6 +68,8 @@ export const useOrders = create<OrderState>((set, get) => ({
       if (route) {
         await appStorage.set(STORAGE_KEYS.activeRoute, route);
       }
+
+      await get().refreshApproach();
     } catch (error) {
       set({ loadingOrder: false, error: toErrorMessage(error) });
     }
@@ -78,6 +85,21 @@ export const useOrders = create<OrderState>((set, get) => ({
       set({ route });
       await appStorage.set(STORAGE_KEYS.activeRoute, route);
     }
+  },
+
+  /**
+   * Tramo hasta la parada que toca.
+   *
+   * No se cachea en disco como la ruta: depende de donde este el conductor, y
+   * un valor viejo dibujaria la linea saliendo de un sitio donde ya no esta.
+   * El backend solo llama a Google cuando el conductor se alejo mas de 200 m.
+   */
+  async refreshApproach() {
+    const order = get().activeOrder;
+    if (!order) {
+      return;
+    }
+    set({ approach: await ordersApi.approach(order.id).catch(() => null) });
   },
 
   async accept(orderId) {
@@ -107,7 +129,7 @@ export const useOrders = create<OrderState>((set, get) => ({
     if (orderId) {
       socketService.leaveOrder(orderId);
     }
-    set({ activeOrder: null, route: null });
+    set({ activeOrder: null, route: null, approach: null });
     await appStorage.remove(STORAGE_KEYS.activeOrder);
     await appStorage.remove(STORAGE_KEYS.activeRoute);
   },

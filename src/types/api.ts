@@ -186,6 +186,20 @@ export interface RouteLeg {
   durationSeconds: number;
 }
 
+/**
+ * Tramo desde la ubicacion del conductor hasta la parada a la que va.
+ *
+ * Anulable de arriba a abajo: sin fix de GPS no hay tramo, y ese es el estado
+ * normal hasta que arranca el seguimiento.
+ */
+export interface OrderApproachRoute {
+  route: ComputedRoute | null;
+  targetStopId: string | null;
+  targetStopType: StopType | null;
+  origin: LatLng | null;
+  originRecordedAt: string | null;
+}
+
 export interface ComputedRoute {
   distanceMeters: number;
   distanceKm: number;
