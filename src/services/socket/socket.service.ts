@@ -35,6 +35,10 @@ class SocketService {
     this.socket?.emit('tracking:leave-order', { orderId });
   }
 
+  emit(event: string, payload: unknown): void {
+    this.socket?.emit(event, payload);
+  }
+
   on(event: string, handler: Handler): void {
     this.socket?.on(event, handler);
   }

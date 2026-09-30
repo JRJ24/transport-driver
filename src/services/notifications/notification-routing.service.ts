@@ -2,6 +2,7 @@ import type { NotificationRoute } from '@/types/api';
 
 const VALID_SCREENS = new Set([
   'order-detail',
+  'order-offer',
   'orders',
   'route',
   'profile',
