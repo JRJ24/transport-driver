@@ -19,6 +19,13 @@ export function navigateToRoute(route: NotificationRoute): void {
         } as never);
       }
       return;
+    // The offer sheet is global and opens itself; just land on the home tab.
+    case 'order-offer':
+      navigationRef.navigate('Main', {
+        screen: 'Inicio',
+        params: { screen: 'Tasks' },
+      } as never);
+      return;
     case 'route':
       navigationRef.navigate('Main', { screen: 'Ruta' } as never);
       return;
