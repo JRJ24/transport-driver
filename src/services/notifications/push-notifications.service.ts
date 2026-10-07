@@ -93,21 +93,25 @@ class PushNotificationsService {
         return;
       }
 
-      const messaging = messagingModule.getMessaging();
-      unsubscribers.push(
-        messagingModule.onMessage(messaging, () => {
-          onForegroundMessage?.();
-        }),
-        messagingModule.onNotificationOpenedApp(messaging, (message) => {
-          const route = parseNotificationRoute(message.data);
-          if (route) {
-            onRoute(route);
-          }
-        }),
-        messagingModule.onTokenRefresh(messaging, (token) => {
-          void this.registerToken(token);
-        }),
-      );
+      try {
+        const messaging = messagingModule.getMessaging();
+        unsubscribers.push(
+          messagingModule.onMessage(messaging, () => {
+            onForegroundMessage?.();
+          }),
+          messagingModule.onNotificationOpenedApp(messaging, (message) => {
+            const route = parseNotificationRoute(message.data);
+            if (route) {
+              onRoute(route);
+            }
+          }),
+          messagingModule.onTokenRefresh(messaging, (token) => {
+            void this.registerToken(token);
+          }),
+        );
+      } catch {
+        // Native Firebase is missing (Expo Go or a stale dev client): stay a no-op.
+      }
     });
 
     return () => {
