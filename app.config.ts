@@ -41,7 +41,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
 
   android: {
-    package: 'do.com.flypack.rutardriver',
+    package: 'com.flypack.rutardriver',
     googleServicesFile:
       process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
     predictiveBackGestureEnabled: false,
