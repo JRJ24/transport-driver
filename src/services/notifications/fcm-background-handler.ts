@@ -9,9 +9,13 @@ void loadMessaging().then((messagingModule) => {
     return;
   }
 
-  const messaging = messagingModule.getMessaging();
-  messagingModule.setBackgroundMessageHandler(messaging, async () => {
-    // Data is synced through REST/socket when the app is active; background FCM
-    // only needs to acknowledge delivery so native resources can be released.
-  });
+  try {
+    const messaging = messagingModule.getMessaging();
+    messagingModule.setBackgroundMessageHandler(messaging, async () => {
+      // Data is synced through REST/socket when the app is active; background FCM
+      // only needs to acknowledge delivery so native resources can be released.
+    });
+  } catch {
+    // Native Firebase is missing (Expo Go or a stale dev client): stay a no-op.
+  }
 });
