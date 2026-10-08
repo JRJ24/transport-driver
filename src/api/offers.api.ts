@@ -35,6 +35,11 @@ export interface PresencePing {
   observedAt: string;
 }
 
+/** Respuesta a un ping de presencia; `reason` dice por que no se guardo. */
+export type PresenceResult =
+  | { accepted: true; h3Cell: string; expiresAt: string }
+  | { accepted: false; reason: string };
+
 export const offersApi = {
   async mine(): Promise<DriverOffer[]> {
     const res = await http.get<ApiResponse<DriverOffer[]>>('/offers/me');
@@ -58,8 +63,12 @@ export const offersApi = {
   },
 
   /** REST fallback of the `driver:presence` socket event. */
-  async ping(input: PresencePing): Promise<void> {
-    await http.post('/drivers/me/presence', input);
+  async ping(input: PresencePing): Promise<PresenceResult> {
+    const res = await http.post<ApiResponse<PresenceResult>>(
+      '/drivers/me/presence',
+      input,
+    );
+    return unwrap(res.data);
   },
 
   async leave(): Promise<void> {

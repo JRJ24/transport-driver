@@ -87,6 +87,12 @@ function AppRoot() {
         return;
       }
       socketService.connect(token);
+      // disconnect() vacia las rooms al cerrar sesion, pero la orden activa
+      // sigue en cache: sin volver a pedirla no llegan sus cambios de estado.
+      const activeOrderId = useOrders.getState().activeOrder?.id;
+      if (activeOrderId) {
+        socketService.joinOrder(activeOrderId);
+      }
       // Dispatch offers and TMS assignments reach the driver in real time.
       const refreshOffers = () => void useOffers.getState().refresh();
       socketService.on('offer.updated', refreshOffers);

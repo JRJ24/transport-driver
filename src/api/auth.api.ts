@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { http, unwrap } from './client';
-import type { ApiResponse, AuthResult, AuthTokens, Me } from '@/types/api';
+import type { ApiResponse, AuthResult, Me } from '@/types/api';
 
 export const authApi = {
   async login(email: string, password: string): Promise<AuthResult> {
@@ -13,19 +13,23 @@ export const authApi = {
     return unwrap(res.data);
   },
 
-  async refresh(refreshToken: string): Promise<AuthTokens> {
-    const res = await http.post<ApiResponse<AuthTokens>>('/auth/refresh', {
-      refreshToken,
-    });
-    return unwrap(res.data);
-  },
-
   async me(): Promise<Me> {
     const res = await http.get<ApiResponse<Me>>('/auth/me');
     return unwrap(res.data);
   },
 
-  async logout(): Promise<void> {
-    await http.post('/auth/logout').catch(() => undefined);
+  /**
+   * Best-effort. Con `accessToken` revoca esa sesion aunque el cliente ya haya
+   * limpiado el token global (o tenga el de un login posterior).
+   */
+  async logout(accessToken?: string): Promise<void> {
+    await http
+      .post('/auth/logout', undefined, {
+        skipAuthRefresh: true,
+        headers: accessToken
+          ? { Authorization: `Bearer ${accessToken}` }
+          : undefined,
+      })
+      .catch(() => undefined);
   },
 };

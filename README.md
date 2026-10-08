@@ -33,14 +33,45 @@ servidor vive aquí — la clave de Routes API y las credenciales de Firebase Ad
 están únicamente en `transport-api`.
 
 ```env
-EXPO_PUBLIC_API_URL=http://<host>:3000/api/v1
-EXPO_PUBLIC_SOCKET_URL=http://<host>:3000
+EXPO_PUBLIC_API_URL=https://api.larutard.com.do/api/v1
+EXPO_PUBLIC_SOCKET_URL=https://api.larutard.com.do
 EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY=
 EXPO_PUBLIC_GOOGLE_MAPS_IOS_API_KEY=
 ```
 
-En emulador Android usa `http://10.0.2.2:3000`; en dispositivo físico, la IP LAN
-de tu máquina.
+Contra un `transport-api` local usa `http://<host>:3000/api/v1` y
+`http://<host>:3000`: en emulador Android `<host>` es `10.0.2.2`; en dispositivo
+físico, la IP LAN de tu máquina. `http://` solo funciona en el dev client (build
+debug): un build release bloquea el tráfico cleartext.
+
+## API
+
+La app consume el `transport-api` desplegado:
+
+| Uso | URL |
+| --- | --- |
+| REST (`EXPO_PUBLIC_API_URL`) | `https://api.larutard.com.do/api/v1` |
+| Socket.IO (`EXPO_PUBLIC_SOCKET_URL`) | `https://api.larutard.com.do` |
+
+`https://conductores.larutard.com.do` es un origen equivalente: también proxya
+`/api` y `/socket.io`. Si `EXPO_PUBLIC_SOCKET_URL` falta, la app usa el origen
+de `EXPO_PUBLIC_API_URL`.
+
+Dónde se configuran:
+
+- **Metro local** (`pnpm start`, `npx expo run:*`): `.env`. Tras cambiarlo,
+  reinicia con `npx expo start --clear`.
+- **EAS Build**: el bloque `env` de cada perfil en `eas.json`. EAS no recibe
+  `.env` (está en `.gitignore`). Si una variable del environment de EAS tiene el
+  mismo nombre, gana el valor de `eas.json` y EAS CLI lo avisa en el log.
+
+Para comprobar que no hay variables EAS con otro host:
+
+```bash
+eas env:list --environment <development|preview|production> --include-sensitive
+```
+
+En `__DEV__` la app imprime `[env] api ... socket ...` al arrancar.
 
 ## Configuración de Google Cloud
 
@@ -54,7 +85,7 @@ Habilita en tu proyecto de Google Cloud:
 
 Crea dos claves de API **restringidas**:
 
-- **Android:** restringe por *package name* (`do.com.flypack.rutardriver`) +
+- **Android:** restringe por *package name* (`com.flypack.rutardriver`) +
   huella **SHA-1/SHA-256** del certificado de firma (obtén el SHA con
   `eas credentials` o `keytool`).
 - **iOS:** restringe por *bundle identifier* (`do.com.flypack.rutardriver`).
@@ -66,7 +97,8 @@ Ponlas en `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_API_KEY` /
 ## Configuración de Firebase (FCM)
 
 1. Crea un proyecto Firebase y añade apps Android e iOS con los mismos
-   identificadores (`do.com.flypack.rutardriver`).
+   identificadores (Android `com.flypack.rutardriver`, iOS
+   `do.com.flypack.rutardriver`).
 2. Descarga `google-services.json` (Android) y `GoogleService-Info.plist` (iOS)
    y colócalos en la raíz del proyecto. **No los subas a Git.**
 3. Descomenta en `app.config.ts`:

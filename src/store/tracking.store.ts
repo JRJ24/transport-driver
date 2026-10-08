@@ -5,6 +5,7 @@ import type { LatLng, TrackingSession } from '@/types/api';
 import { locationService } from '@/services/location/location.service';
 import { locationSync } from '@/services/location/location-sync.service';
 import { useConnectivity } from './connectivity.store';
+import { useOrders } from './order.store';
 
 interface TrackingState {
   session: TrackingSession | null;
@@ -61,7 +62,11 @@ export const useTracking = create<TrackingState>((set, get) => ({
     set({ error: null });
     try {
       const session = await trackingApi.createSession(orderId);
+      // Crear la sesion pasa la orden a IN_PROGRESS sin emitir
+      // order.status.changed: sin recargarla, «Como llegar» seguia en la recogida.
+      const refreshed = useOrders.getState().selectOrder(orderId);
       await attach(session, set, get);
+      await refreshed;
       return true;
     } catch (error) {
       set({ isTracking: false, error: toErrorMessage(error) });
@@ -121,3 +126,23 @@ export const useTracking = create<TrackingState>((set, get) => ({
     set({ pendingCount: await locationSync.pending() });
   },
 }));
+
+/*
+ * El servidor ya no acepta puntos de la sesion (403: un operador la termino o
+ * el conductor ya no esta asignado). Se apaga el GPS y se cierra la sesion: con
+ * FORBIDDEN seguiria ACTIVE y nadie mas la terminaria.
+ */
+locationSync.setRejectedHandler((sessionId) => {
+  const { session } = useTracking.getState();
+  if (session?.id !== sessionId) {
+    return;
+  }
+  if (flushTimer) {
+    clearInterval(flushTimer);
+    flushTimer = null;
+  }
+  useTracking.setState({ session: null, isTracking: false });
+  void locationService.stop().catch(() => undefined);
+  void trackingApi.stop(sessionId).catch(() => undefined);
+  void useTracking.getState().refreshPending().catch(() => undefined);
+});

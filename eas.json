@@ -12,7 +12,9 @@
         "buildType": "apk"
       },
       "env": {
-        "IOS_APS_ENVIRONMENT": "development"
+        "IOS_APS_ENVIRONMENT": "development",
+        "EXPO_PUBLIC_API_URL": "https://api.larutard.com.do/api/v1",
+        "EXPO_PUBLIC_SOCKET_URL": "https://api.larutard.com.do"
       }
     },
 
@@ -23,7 +25,9 @@
         "buildType": "apk"
       },
       "env": {
-        "IOS_APS_ENVIRONMENT": "production"
+        "IOS_APS_ENVIRONMENT": "production",
+        "EXPO_PUBLIC_API_URL": "https://api.larutard.com.do/api/v1",
+        "EXPO_PUBLIC_SOCKET_URL": "https://api.larutard.com.do"
       }
     },
 
@@ -34,7 +38,9 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "IOS_APS_ENVIRONMENT": "production"
+        "IOS_APS_ENVIRONMENT": "production",
+        "EXPO_PUBLIC_API_URL": "https://api.larutard.com.do/api/v1",
+        "EXPO_PUBLIC_SOCKET_URL": "https://api.larutard.com.do"
       }
     }
   },
