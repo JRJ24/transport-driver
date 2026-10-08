@@ -4,6 +4,7 @@ import { ordersApi } from '@/api/orders.api';
 import { toErrorMessage } from '@/api/client';
 import type {
   Assignment,
+  AssignmentStatus,
   ComputedRoute,
   OrderApproachRoute,
   OrderStatus,
@@ -11,6 +12,44 @@ import type {
 } from '@/types/api';
 import { appStorage, STORAGE_KEYS } from '@/services/storage/app-storage';
 import { socketService } from '@/services/socket/socket.service';
+
+const CLOSED_ASSIGNMENTS: ReadonlySet<AssignmentStatus> = new Set([
+  'REJECTED',
+  'CANCELLED',
+  'COMPLETED',
+]);
+const CLOSED_ORDERS: ReadonlySet<OrderStatus> = new Set([
+  'DELIVERED',
+  'CANCELLED',
+  'FAILED',
+]);
+
+// El servidor emite order.status.changed solo a order:{id}, no a driver:{id}:
+// sin estar en la room de cada orden asignada, una cancelacion desde el TMS
+// de una orden que no esta abierta no llega.
+let watchedOrderIds = new Set<string>();
+
+function watchAssignedOrders(
+  assignments: Assignment[],
+  activeOrderId: string | undefined,
+): void {
+  const next = new Set(
+    assignments
+      .filter(
+        (a) =>
+          !CLOSED_ASSIGNMENTS.has(a.assignmentStatus) &&
+          !(a.order && CLOSED_ORDERS.has(a.order.status)),
+      )
+      .map((a) => a.orderId),
+  );
+  watchedOrderIds.forEach((orderId) => {
+    if (!next.has(orderId) && orderId !== activeOrderId) {
+      socketService.leaveOrder(orderId);
+    }
+  });
+  next.forEach((orderId) => socketService.joinOrder(orderId));
+  watchedOrderIds = next;
+}
 
 interface OrderState {
   assignments: Assignment[];
@@ -46,6 +85,7 @@ export const useOrders = create<OrderState>((set, get) => ({
     try {
       const assignments = await driversApi.myAssignments();
       set({ assignments, loadingList: false });
+      watchAssignedOrders(assignments, get().activeOrder?.id);
     } catch (error) {
       set({ loadingList: false, error: toErrorMessage(error) });
     }
@@ -56,7 +96,11 @@ export const useOrders = create<OrderState>((set, get) => ({
     try {
       const order = await ordersApi.detail(orderId);
       const previousOrderId = get().activeOrder?.id;
-      if (previousOrderId && previousOrderId !== orderId) {
+      if (
+        previousOrderId &&
+        previousOrderId !== orderId &&
+        !watchedOrderIds.has(previousOrderId)
+      ) {
         socketService.leaveOrder(previousOrderId);
       }
       set({ activeOrder: order });
@@ -121,12 +165,15 @@ export const useOrders = create<OrderState>((set, get) => ({
     ]);
     if (order) {
       set({ activeOrder: order, route });
+      // Sin esto, tras reabrir la app no llega una cancelacion de la orden
+      // activa hasta entrar al detalle. El Set lo guarda hasta que conecte.
+      socketService.joinOrder(order.id);
     }
   },
 
   async clearActive() {
     const orderId = get().activeOrder?.id;
-    if (orderId) {
+    if (orderId && !watchedOrderIds.has(orderId)) {
       socketService.leaveOrder(orderId);
     }
     set({ activeOrder: null, route: null, approach: null });

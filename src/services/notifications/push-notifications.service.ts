@@ -1,4 +1,5 @@
 import { PermissionsAndroid, Platform } from 'react-native';
+import { http } from '@/api/client';
 import { devicesApi } from '@/api/devices.api';
 import { env } from '@/config/env';
 import type { DevicePlatform, NotificationRoute } from '@/types/api';
@@ -73,10 +74,33 @@ class PushNotificationsService {
     }
   }
 
-  async unregister(): Promise<void> {
-    if (this.registeredToken) {
-      await devicesApi.remove(this.registeredToken);
-      this.registeredToken = null;
+  /**
+   * Best-effort, nunca lanza. `accessToken` es el de la sesion que se cierra:
+   * al llamar aqui el cliente ya no tiene token global.
+   */
+  async unregister(accessToken?: string): Promise<void> {
+    const token = this.registeredToken;
+    this.registeredToken = null;
+    if (token) {
+      await http
+        .delete(`/devices/${encodeURIComponent(token)}`, {
+          skipAuthRefresh: true,
+          headers: accessToken
+            ? { Authorization: `Bearer ${accessToken}` }
+            : undefined,
+        })
+        .catch(() => undefined);
+    }
+    // Con la sesion ya expirada el DELETE da 401 y el servidor seguiria
+    // mandando aqui los push del conductor que salio; borrar el token en FCM
+    // los corta igual. El proximo register() obtiene uno nuevo.
+    try {
+      const messagingModule = await loadMessaging();
+      if (messagingModule) {
+        await messagingModule.deleteToken(messagingModule.getMessaging());
+      }
+    } catch {
+      // Expo Go o build sin Firebase nativo: no hay token que borrar.
     }
   }
 

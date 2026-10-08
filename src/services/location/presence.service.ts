@@ -4,6 +4,17 @@ import { socketService } from '@/services/socket/socket.service';
 
 /** The backend treats a position older than 60 s as stale. */
 const PING_INTERVAL_MS = 10_000;
+// Quieto, el watch no entrega fixes nuevos (distanceInterval) y reenviar el
+// mismo observedAt lo rechaza el servidor (OUT_OF_ORDER y luego STALE_TIMESTAMP).
+const MAX_FIX_AGE_MS = 20_000;
+// getCurrentPositionAsync no tiene timeout y puede tardar mucho bajo techo.
+const FIX_TIMEOUT_MS = 8_000;
+
+function logRejection(res: unknown): void {
+  if (res && typeof res === 'object' && 'accepted' in res && res.accepted === false) {
+    console.warn('[presence] rechazada', 'reason' in res ? res.reason : res);
+  }
+}
 
 /**
  * Reports where an AVAILABLE driver is, so automatic dispatch can find them
@@ -15,6 +26,8 @@ class PresenceService {
   private watch: Location.LocationSubscription | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastFix: Location.LocationObject | null = null;
+  private lastSentAt = 0;
+  private sending = false;
   private vehicleId: string | undefined;
 
   get isRunning(): boolean {
@@ -63,8 +76,21 @@ class PresenceService {
   }
 
   private async send(): Promise<void> {
-    const fix = this.lastFix;
-    if (!fix) {
+    if (this.sending) {
+      return;
+    }
+    this.sending = true;
+    try {
+      await this.sendFix();
+    } finally {
+      this.sending = false;
+    }
+  }
+
+  private async sendFix(): Promise<void> {
+    const fix = await this.freshFix();
+    // Un fix ya enviado volveria como OUT_OF_ORDER.
+    if (!fix || fix.timestamp <= this.lastSentAt) {
       return;
     }
     const { coords } = fix;
@@ -79,11 +105,44 @@ class PresenceService {
       observedAt: new Date(fix.timestamp).toISOString(),
     };
 
+    this.lastSentAt = fix.timestamp;
     if (socketService.connected) {
-      socketService.emit('driver:presence', ping);
+      socketService.emitWithAck('driver:presence', ping, logRejection);
       return;
     }
-    await offersApi.ping(ping).catch(() => undefined);
+    logRejection(await offersApi.ping(ping).catch(() => null));
+  }
+
+  private async freshFix(): Promise<Location.LocationObject | null> {
+    const fix = this.lastFix;
+    if (fix && Date.now() - fix.timestamp <= MAX_FIX_AGE_MS) {
+      return fix;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const current = await Promise.race([
+        Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+          // Cada 20 s: no hay que abrir el dialogo de ajustes en bucle.
+          mayShowUserSettingsDialog: false,
+        }),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), FIX_TIMEOUT_MS);
+        }),
+      ]);
+      // stop() pudo llegar mientras se esperaba el fix.
+      if (!current || !this.watch) {
+        return null;
+      }
+      if (!this.lastFix || current.timestamp > this.lastFix.timestamp) {
+        this.lastFix = current;
+      }
+      return this.lastFix;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 

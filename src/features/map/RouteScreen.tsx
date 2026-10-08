@@ -223,6 +223,10 @@ export function RouteScreen() {
         ]);
         return;
       }
+      // Antes de DELIVERED: despues la asignacion queda COMPLETED y el servidor
+      // responde 403 a los puntos que seguian en la cola. Si DELIVERED falla,
+      // el GPS sigue activo.
+      await flush();
       await updateStatus(activeOrder.id, 'DELIVERED');
       await stop();
       await clearActive();

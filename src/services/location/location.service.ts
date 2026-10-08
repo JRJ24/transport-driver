@@ -4,14 +4,19 @@ import type { TrackingSession } from '@/types/api';
 import { appStorage, STORAGE_KEYS } from '@/services/storage/app-storage';
 import { BACKGROUND_LOCATION_TASK } from './background-location.task';
 import { buildLocationPayload } from './location-utils';
-import { locationSync } from './location-sync.service';
+import {
+  isRetryable,
+  isSessionRejected,
+  locationSync,
+} from './location-sync.service';
 
 type FixListener = (location: Location.LocationObject) => void;
 
 /**
  * Owns GPS acquisition for an active tracking session. Foreground: a live watch
  * drives the map and sends fixes. Background: expo-location delivers batched
- * fixes to the TaskManager task. All sends fall back to the offline queue.
+ * fixes to the TaskManager task. Retryable failures fall back to the offline
+ * queue.
  */
 class LocationService {
   private watch: Location.LocationSubscription | null = null;
@@ -21,6 +26,9 @@ class LocationService {
     this.sessionId = session.id;
     // Persist so the background task (separate JS context) knows the session.
     await appStorage.set(STORAGE_KEYS.activeSession, session);
+
+    // Primero el background, para que el watch lo vea activo desde el primer fix.
+    await this.startBackground();
 
     this.watch?.remove();
     this.watch = await Location.watchPositionAsync(
@@ -34,8 +42,6 @@ class LocationService {
         void this.sendOrQueue(session.id, loc);
       },
     );
-
-    await this.startBackground();
   }
 
   private async startBackground(): Promise<void> {
@@ -73,7 +79,10 @@ class LocationService {
       BACKGROUND_LOCATION_TASK,
     ).catch(() => false);
     if (running) {
-      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      // El task se detiene solo ante un 403 y puede ganar esta carrera.
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(
+        () => undefined,
+      );
     }
     await appStorage.remove(STORAGE_KEYS.activeSession);
   }
@@ -86,11 +95,25 @@ class LocationService {
     sessionId: string,
     loc: Location.LocationObject,
   ): Promise<void> {
-    const payload = buildLocationPayload(loc);
+    // Con el task de background activo, ese ya envia este mismo fix: mandarlo
+    // tambien desde aqui guardaba cada punto dos veces.
+    const backgroundSends = await Location.hasStartedLocationUpdatesAsync(
+      BACKGROUND_LOCATION_TASK,
+    ).catch(() => false);
+    if (backgroundSends) {
+      return;
+    }
+
+    const payload = buildLocationPayload(loc, sessionId);
     try {
       await trackingApi.sendLocation(sessionId, payload);
-    } catch {
-      await locationSync.enqueue(sessionId, payload);
+    } catch (error) {
+      if (isRetryable(error)) {
+        await locationSync.enqueue(sessionId, payload);
+      } else if (isSessionRejected(error)) {
+        await locationSync.rejectSession(sessionId);
+      }
+      // 400/404: no entrara nunca; encolarlo bloqueaba el lote de su sesion.
     }
   }
 }
