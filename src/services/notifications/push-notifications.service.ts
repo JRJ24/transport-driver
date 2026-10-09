@@ -13,9 +13,14 @@ type MessagingInstance = ReturnType<MessagingModule['getMessaging']>;
 let messagingModulePromise: Promise<MessagingModule | null> | null = null;
 
 async function loadMessaging(): Promise<MessagingModule | null> {
-  messagingModulePromise ??= import('@react-native-firebase/messaging').catch(
-    () => null,
-  );
+  // Expo's import() returns a thenable without .catch, so await it instead.
+  messagingModulePromise ??= (async () => {
+    try {
+      return await import('@react-native-firebase/messaging');
+    } catch {
+      return null;
+    }
+  })();
   return messagingModulePromise;
 }
 
