@@ -69,6 +69,7 @@ export interface AuthUser {
   fullName: string;
   email: string;
   phone: string;
+  avatarUrl?: string | null;
   status: string;
   roles: Role[];
   lastLoginAt?: string | null;
@@ -111,7 +112,20 @@ export interface DriverProfile {
   availabilityStatus: DriverStatus;
   verificationStatus: string;
   ratingAVG: number | string;
-  user?: AuthUser;
+  user?: Partial<AuthUser> & { avatarUrl?: string | null };
+}
+
+/** GET/PATCH /users/me. */
+export interface UserProfile {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string | null;
+  avatarUrl: string | null;
+  status: string;
+  roles: Role[];
+  lastLoginAt?: string | null;
+  createdAt?: string;
 }
 
 export interface Vehicle {
@@ -322,6 +336,8 @@ export interface DeliveryProof {
   validationStatus: ValidationStatus;
   /** `GET /delivery-proofs` incluye las firmas de cada prueba. */
   signatures?: Signature[];
+  /** Y tambien sus adjuntos (foto y firma). */
+  attachments?: Attachment[];
 }
 
 export interface Signature {
@@ -356,6 +372,11 @@ export interface NotificationRoute {
 
 /** Eventos de orden que registra el conductor desde la ruta. */
 export type OrderEventType =
+  | 'CREATED'
+  | 'ASSIGNED'
+  | 'ACCEPTED'
+  | 'IN_TRANSIT'
+  | 'INCIDENT_REPORTED'
   | 'ARRIVED'
   | 'PICKED_UP'
   | 'DELIVERED'

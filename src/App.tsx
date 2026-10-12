@@ -2,38 +2,39 @@ import 'react-native-gesture-handler';
 // Registers the background location task at module scope (required by Expo).
 import '@/services/location/background-location.task';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import {
-  DarkTheme,
-  NavigationContainer,
-  type Theme,
-} from '@react-navigation/native';
+import { DefaultTheme, NavigationContainer, type Theme } from '@react-navigation/native';
 import { colors } from '@/theme/theme';
 import { navigationRef, navigateToRoute } from '@/navigation/ref';
 import { RootNavigator } from '@/navigation/RootNavigator';
 import { useAuth } from '@/store/auth.store';
 import { useOrders } from '@/store/order.store';
 import { useTracking } from '@/store/tracking.store';
+import { useTrip } from '@/store/trip.store';
 import { useNotifications } from '@/store/notifications.store';
-import type { AppNotification } from '@/types/api';
+import { useToast } from '@/store/toast.store';
+import { useEvidence } from '@/store/evidence.store';
+import type { AppNotification, OrderStatus } from '@/types/api';
 import { secureStorage } from '@/services/storage/secure-storage';
 import { socketService } from '@/services/socket/socket.service';
 import { pushNotifications } from '@/services/notifications/push-notifications.service';
 import { presenceService } from '@/services/location/presence.service';
 import { useOffers } from '@/store/offers.store';
 import { OfferSheet } from '@/features/offers/OfferSheet';
+import { ToastHost } from '@/components/ToastHost';
 
 const navTheme: Theme = {
-  ...DarkTheme,
+  ...DefaultTheme,
   colors: {
-    ...DarkTheme.colors,
+    ...DefaultTheme.colors,
     background: colors.bg,
     card: colors.surface,
     text: colors.text,
     border: colors.border,
-    primary: colors.primaryBright,
+    primary: colors.primary,
   },
 };
 
@@ -41,24 +42,19 @@ function AppRoot() {
   const status = useAuth((s) => s.status);
   const driver = useAuth((s) => s.driver);
   const isTracking = useTracking((s) => s.isTracking);
+  const hasTrip = useTrip((s) => Boolean(s.order));
   const bootstrap = useAuth((s) => s.bootstrap);
-  const hydrateOrders = useOrders((s) => s.hydrateFromCache);
   const loadAssignments = useOrders((s) => s.loadAssignments);
-  const selectOrder = useOrders((s) => s.selectOrder);
   const prependNotification = useNotifications((s) => s.prepend);
   const loadNotifications = useNotifications((s) => s.load);
+  const wasAuthenticated = useRef(false);
 
   // One-time setup.
   useEffect(() => {
     pushNotifications.configure();
     // Si el SO mato la app durante un servicio, el task de background sigue
-    // encolando puntos: hay que volver a enganchar la sesion a la UI.
-    void hydrateOrders().then(() => {
-      const active = useOrders.getState().activeOrder;
-      if (active) {
-        void useTracking.getState().resume(active.id);
-      }
-    });
+    // encolando puntos: se vuelve a enganchar la sesion a la UI.
+    void useTrip.getState().hydrate();
     void bootstrap();
 
     const unsubscribe = pushNotifications.addListeners(
@@ -68,67 +64,86 @@ function AppRoot() {
       },
     );
     void pushNotifications.getInitialRoute().then((route) => {
-      if (route) {
-        setTimeout(() => navigateToRoute(route), 800);
-      }
+      if (route) navigateToRoute(route);
     });
     return unsubscribe;
-  }, [bootstrap, hydrateOrders, loadNotifications]);
+  }, [bootstrap, loadNotifications]);
 
   // Live channel while authenticated.
   useEffect(() => {
     if (status !== 'authenticated') {
       return;
     }
+    wasAuthenticated.current = true;
     let active = true;
+    // El servidor es la verdad del servicio en curso.
+    void useTrip.getState().reconcile();
+
     void (async () => {
       const token = await secureStorage.getAccessToken();
       if (!token || !active) {
         return;
       }
       socketService.connect(token);
-      // disconnect() vacia las rooms al cerrar sesion, pero la orden activa
-      // sigue en cache: sin volver a pedirla no llegan sus cambios de estado.
-      const activeOrderId = useOrders.getState().activeOrder?.id;
-      if (activeOrderId) {
-        socketService.joinOrder(activeOrderId);
+      const tripOrderId = useTrip.getState().order?.id;
+      if (tripOrderId) {
+        socketService.joinOrder(tripOrderId);
       }
-      // Dispatch offers and TMS assignments reach the driver in real time.
-      const refreshOffers = () => void useOffers.getState().refresh();
-      socketService.on('offer.updated', refreshOffers);
-      socketService.on('connect', refreshOffers);
+      // En cada (re)conexion se resincroniza lo que pudo cambiar sin nosotros.
+      socketService.on('connect', () => {
+        void useOffers.getState().refresh();
+        void loadAssignments();
+        void useTrip.getState().refreshOrder();
+      });
+      socketService.on('offer.updated', () => void useOffers.getState().refresh());
       socketService.on('assignment.created', () => {
         void loadAssignments();
+        useToast.getState().show({ tone: 'info', title: 'Nueva orden asignada', message: 'Revísala en Inicio.' });
       });
       socketService.on('notification.created', (payload) => {
         prependNotification(payload as AppNotification);
       });
       socketService.on('order.status.changed', (payload) => {
         void loadAssignments();
-        const activeOrder = useOrders.getState().activeOrder;
-        const changedOrderId =
-          payload && typeof payload === 'object' && 'orderId' in payload
-            ? String(payload.orderId)
-            : null;
-        if (activeOrder && changedOrderId === activeOrder.id) {
-          void selectOrder(activeOrder.id);
+        if (payload && typeof payload === 'object' && 'orderId' in payload && 'status' in payload) {
+          const { orderId, status: next } = payload as { orderId: string; status: OrderStatus };
+          useTrip.getState().onRemoteStatus(String(orderId), next);
         }
       });
     })();
     void loadNotifications();
 
+    // Al volver a la app: estado fresco.
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void loadAssignments();
+        void useTrip.getState().refreshOrder();
+      }
+    });
+
     return () => {
       active = false;
+      sub.remove();
       socketService.disconnect();
       useOffers.getState().clear();
     };
-  }, [status, prependNotification, loadAssignments, loadNotifications, selectOrder]);
+  }, [status, prependNotification, loadAssignments, loadNotifications]);
 
-  // Available and not on a trip: report presence so dispatch can find us.
-  const available =
-    status === 'authenticated' && driver?.availabilityStatus === 'AVAILABLE';
+  // Cerrar sesion (o un 401) no deja GPS ni datos del conductor anterior.
   useEffect(() => {
-    if (available && !isTracking) {
+    if (status === 'unauthenticated' && wasAuthenticated.current) {
+      wasAuthenticated.current = false;
+      void useTracking.getState().stop();
+      void useTrip.getState().clear();
+      void useEvidence.getState().clear();
+      useOrders.getState().reset();
+    }
+  }, [status]);
+
+  // Disponible y sin viaje: reporta presencia para que el despacho lo encuentre.
+  const available = status === 'authenticated' && driver?.availabilityStatus === 'AVAILABLE';
+  useEffect(() => {
+    if (available && !isTracking && !hasTrip) {
       void presenceService.start();
       return () => {
         void presenceService.stop();
@@ -138,12 +153,13 @@ function AppRoot() {
       void presenceService.stop({ leave: true });
     }
     return undefined;
-  }, [available, isTracking, status]);
+  }, [available, isTracking, hasTrip, status]);
 
   return (
     <>
       <RootNavigator />
-      {status === 'authenticated' && driver ? <OfferSheet /> : null}
+      {status === 'authenticated' && driver && !hasTrip ? <OfferSheet /> : null}
+      <ToastHost />
     </>
   );
 }

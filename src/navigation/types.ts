@@ -7,11 +7,15 @@ export type InicioStackParamList = {
 export type TabParamList = {
   Inicio: undefined;
   Ruta: undefined;
-  Evid: undefined;
   Perfil: undefined;
 };
 
 export type RootStackParamList = {
   Login: undefined;
   Main: undefined;
+  Evidence: { orderId: string };
+  TripCompleted: { orderCode: string; amount?: string | number | null; recipient?: string };
+  EditProfile: undefined;
+  ChangePassword: undefined;
+  ChangeEmail: undefined;
 };

@@ -137,22 +137,29 @@ npx tsc --noEmit  # type-check
 src/
   api/            cliente axios (refresh token + envelope) y módulos por dominio
   config/         env público (expo-constants)
-  components/     UI compartida (tema oscuro del diseño)
-  features/       auth, orders, map (Ruta), evidence, profile, notifications
-  navigation/     tabs (Inicio · Ruta · Evid. · Perfil) + stack + deep-link push
+  components/     UI compartida: botones, badges, SwipeButton, Sheet, Toast, timeline
+  features/       auth, orders, map (Ruta en vivo), evidence (stepper), trip, profile, notifications
+  navigation/     tabs (Inicio · Ruta · Perfil) + modales (Evidencia, Entrega completada, perfil)
   services/
     location/     permisos, watch foreground, tarea background, cola offline
     notifications/registro FCM + ruteo seguro desde el payload
     socket/        socket.io (updates en vivo)
     storage/       expo-secure-store (tokens) + AsyncStorage (cache/colas)
-  store/          zustand: auth, order, tracking, connectivity, notifications
-  theme/          tokens de diseño (dark)
+  store/          zustand: auth, order (lista), trip (servicio activo), tracking,
+                  evidence (borrador), toast, connectivity, notifications
+  theme/          tokens de diseño (claro y cálido)
   types/          contrato compartido con transport-api
 ```
 
 ### Estado global (zustand)
-Separado por dominio: `auth`, `order`, `tracking`, `connectivity`,
-`notifications`. Los tokens **nunca** se guardan en almacenamiento inseguro
+Separado por dominio: `auth`, `order`, `trip`, `tracking`, `evidence`, `toast`,
+`connectivity`, `notifications`.
+
+`useTrip` es **el** servicio en curso (uno solo). Ver el detalle de otra orden
+no lo cambia. Al arrancar se reconcilia con el servidor
+(`GET /tracking/sessions/active` y las asignaciones EN CURSO). Iniciar otra
+orden con un servicio vivo se bloquea en la app, y en la API con un 409
+`ACTIVE_TRIP_EXISTS` en cuanto la API lo implemente. Los tokens **nunca** se guardan en almacenamiento inseguro
 (solo `expo-secure-store`).
 
 ### Offline-first
@@ -168,13 +175,29 @@ Separado por dominio: `auth`, `order`, `tracking`, `connectivity`,
 2. Registro de token FCM → `POST /devices`.
 3. Órdenes asignadas → `GET /assignments/me`.
 4. Detalle de orden (origen, destino, paradas, ruta, distancia, ETA, carga).
-5. Aceptar → `POST /orders/:id/accept`. Iniciar servicio → crea sesión de
-   tracking (`POST /tracking/sessions`), pide permisos y arranca GPS.
-6. Coordenadas cada ~5 s → `POST /tracking/sessions/:id/locations` (+ batch
-   offline). Foreground service visible en Android.
-7. Estados permitidos → `PATCH /orders/:id/status`.
-8. Completar → `DELIVERED`, detiene tracking (`POST /tracking/sessions/:id/stop`)
-   y sincroniza pendientes.
+5. Aceptar → `POST /orders/:id/accept` (o rechazar → `PATCH /assignments/:id/reject`).
+6. **Deslizar para iniciar.** Pide permisos y crea la sesión con
+   `POST /tracking/sessions {orderId, pickupFlow: true}`. La app marca el servicio
+   como iniciado y abre Ruta.
+7. **Ruta en vivo.** La cámara sigue al vehículo y el tramo se recalcula desde el GPS
+   actual (`GET /routes/orders/:id/approach?latitude&longitude&heading&reroute`).
+   Fases:
+   - Hacia la recogida: «Llegué» → `POST /orders/:id/stops/:stopId/arrive`.
+   - Recoger: deslizar «carga recogida» → `POST /orders/:id/stops/:stopId/complete`.
+   - Hacia la entrega: «Llegué» → `arrive` en la parada de entrega.
+8. **Evidencia obligatoria** (stepper: receptor → foto → firma → confirmar).
+   El borrador queda en disco y el envío se puede reintentar sin duplicar.
+   Deslizar «completar entrega» envía la evidencia y `DELIVERED`, detiene el
+   tracking y muestra la confirmación.
+
+### Compatibilidad con la API desplegada
+Los puntos nuevos de la API (`pickupFlow`, endpoints de paradas, origen en vivo
+del tramo, 409 `ACTIVE_TRIP_EXISTS`) se usan si existen:
+- `pickupFlow`: si la API responde 400, se reintenta sin el campo.
+- Paradas: si el endpoint da 404, se registra un evento `ARRIVED`/`PICKED_UP` y la
+  fase se guarda en el teléfono.
+- Origen en vivo: si la API ignora `latitude/longitude`, el tramo hacia la
+  recogida se dibuja recto hasta que la API calcule hacia la recogida.
 
 ## Cómo probar el tracking con ubicación simulada
 

@@ -4,8 +4,8 @@ import { toErrorMessage } from '@/api/client';
 import type { LatLng, TrackingSession } from '@/types/api';
 import { locationService } from '@/services/location/location.service';
 import { locationSync } from '@/services/location/location-sync.service';
+import { appStorage, STORAGE_KEYS } from '@/services/storage/app-storage';
 import { useConnectivity } from './connectivity.store';
-import { useOrders } from './order.store';
 
 interface TrackingState {
   session: TrackingSession | null;
@@ -15,14 +15,24 @@ interface TrackingState {
   pendingCount: number;
   error: string | null;
 
-  start: (orderId: string) => Promise<boolean>;
-  resume: (orderId: string) => Promise<void>;
+  /** Lanza el error de la API (409 si ya hay otro servicio en curso). */
+  start: (orderId: string) => Promise<TrackingSession>;
+  resume: (orderId: string) => Promise<boolean>;
   stop: () => Promise<void>;
   flush: () => Promise<void>;
   refreshPending: () => Promise<void>;
 }
 
+/** Ya hay un servicio con GPS activo para otra orden. */
+export class TripInProgressError extends Error {
+  constructor(readonly orderId: string) {
+    super('Ya tienes un servicio en curso. Termínalo antes de iniciar otro.');
+    this.name = 'TripInProgressError';
+  }
+}
+
 let flushTimer: ReturnType<typeof setInterval> | null = null;
+let starting: Promise<TrackingSession> | null = null;
 
 type SetState = (partial: Partial<TrackingState>) => void;
 type GetState = () => TrackingState;
@@ -58,45 +68,61 @@ export const useTracking = create<TrackingState>((set, get) => ({
   pendingCount: 0,
   error: null,
 
-  async start(orderId) {
-    set({ error: null });
-    try {
-      const session = await trackingApi.createSession(orderId);
-      // Crear la sesion pasa la orden a IN_PROGRESS sin emitir
-      // order.status.changed: sin recargarla, «Como llegar» seguia en la recogida.
-      const refreshed = useOrders.getState().selectOrder(orderId);
-      await attach(session, set, get);
-      await refreshed;
+  start(orderId) {
+    const current = get().session;
+    if (current && current.orderId !== orderId) {
+      return Promise.reject(new TripInProgressError(current.orderId));
+    }
+    if (current && current.orderId === orderId && get().isTracking) {
+      return Promise.resolve(current);
+    }
+    // Doble toque: la segunda llamada espera a la primera.
+    starting ??= (async () => {
+      set({ error: null });
+      try {
+        const session = await trackingApi.createSession(orderId);
+        await attach(session, set, get);
+        return session;
+      } catch (error) {
+        set({ error: toErrorMessage(error) });
+        throw error;
+      }
+    })().finally(() => {
+      starting = null;
+    });
+    return starting;
+  },
+
+  /**
+   * Recupera la sesion tras un reinicio de la app.
+   *
+   * Sin red se usa la sesion guardada para el task de background: antes la UI
+   * quedaba en «GPS en pausa» y al completar no se cerraba la sesion.
+   */
+  async resume(orderId) {
+    if (get().session?.orderId === orderId && get().isTracking) {
       return true;
-    } catch (error) {
-      set({ isTracking: false, error: toErrorMessage(error) });
+    }
+    let session: TrackingSession | null = null;
+    try {
+      session = await trackingApi.activeSession(orderId);
+    } catch {
+      const cached = await appStorage.get<TrackingSession>(STORAGE_KEYS.activeSession);
+      session = cached?.orderId === orderId ? cached : null;
+    }
+    if (!session) {
+      return false;
+    }
+    try {
+      await attach(session, set, get);
+      return true;
+    } catch {
       return false;
     }
   },
 
-  /**
-   * Recupera la sesion de tracking tras un reinicio de la app.
-   *
-   * El task de background sobrevive a que el SO mate la app y sigue encolando
-   * puntos, pero la sesion solo vivia en memoria: la UI decia «GPS en pausa» y
-   * «Completar entrega» ya no llamaba a `stop()`, asi que la sesion se quedaba
-   * ACTIVE para siempre en la base de datos.
-   */
-  async resume(orderId) {
-    try {
-      const session = await trackingApi.activeSession(orderId);
-      if (!session) {
-        return;
-      }
-
-      await attach(session, set, get);
-    } catch {
-      // Sin red al arrancar: el task de background sigue encolando igual.
-    }
-  },
-
   async stop() {
-    const session = get().session;
+    const session = get().session ?? (await appStorage.get<TrackingSession>(STORAGE_KEYS.activeSession));
     await locationService.stop();
     if (flushTimer) {
       clearInterval(flushTimer);

@@ -1,33 +1,5 @@
 import { Platform } from 'react-native';
-import type { LatLng, OrderStop, TransportOrder } from '@/types/api';
-
-/**
- * A donde tiene que ir el conductor ahora mismo.
- *
- * El boton de navegacion mandaba siempre al destino final, asi que al empezar
- * un viaje enviaba a entregar antes de recoger.
- *
- * `completedAt` existe en el modelo pero hoy no lo escribe nadie, de modo que
- * la senal fiable es el estado de la orden: hasta que arranca el viaje toca la
- * recogida, y despues la entrega.
- */
-export function nextStopForDriver(order?: TransportOrder | null): OrderStop | null {
-  const stops = [...(order?.orderStops ?? [])].sort((a, b) => a.sequence - b.sequence);
-
-  if (stops.length === 0) {
-    return null;
-  }
-
-  const pending = stops.filter((stop) => !stop.completedAt);
-  const pool = pending.length > 0 ? pending : stops;
-  const alreadyPickedUp = order?.status === 'IN_PROGRESS' || order?.status === 'DELIVERED';
-
-  if (alreadyPickedUp) {
-    return pool.find((stop) => stop.stopType === 'DROPOFF') ?? pool[pool.length - 1] ?? null;
-  }
-
-  return pool.find((stop) => stop.stopType === 'PICKUP') ?? pool[0] ?? null;
-}
+import type { LatLng } from '@/types/api';
 
 /**
  * Enlace de navegacion por plataforma.

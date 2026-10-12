@@ -1,14 +1,18 @@
-import React, { useEffect } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Button, Card, Muted } from '@/components/ui';
-import { colors, spacing } from '@/theme/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { EmptyState } from '@/components/ui';
+import { colors, elevation, radius, spacing } from '@/theme/theme';
 import { useNotifications } from '@/store/notifications.store';
-import { notificationsApi } from '@/api/notifications.api';
+import { navigateToRoute } from '@/navigation/ref';
+import { parseNotificationRoute } from '@/services/notifications/notification-routing.service';
+import { formatRelativeDay } from '@/utils/format';
+import { haptic } from '@/utils/feedback';
 
 export function NotificationsScreen() {
   const { items, load, markRead } = useNotifications();
-  const [refreshing, setRefreshing] = React.useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     void load();
@@ -22,47 +26,70 @@ export function NotificationsScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['bottom']}>
-      <ScrollView
+      <FlatList
+        data={items}
+        keyExtractor={(n) => n.id}
         contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primaryBright} />
+        ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} />}
+        ListEmptyComponent={
+          <EmptyState icon="notifications-off-outline" title="Todo al día" message="Aquí verás avisos de órdenes, ofertas y operaciones." />
         }
-      >
-        <Button
-          label="Enviar notificación de prueba"
-          tone="neutral"
-          onPress={() => {
-            void notificationsApi.sendTest().then(() => load());
-          }}
-        />
-
-        {items.map((n) => (
-          <Pressable key={n.id} onPress={() => void markRead(n.id)}>
-            <Card style={[styles.item, !n.readAt && styles.unread]}>
-              <View style={styles.itemHeader}>
-                <Text style={styles.itemTitle}>{n.title}</Text>
-                {!n.readAt && <View style={styles.dot} />}
+        renderItem={({ item: n }) => {
+          const unread = !n.readAt;
+          return (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                haptic.tap();
+                void markRead(n.id);
+                const route = parseNotificationRoute(n.data);
+                if (route) navigateToRoute(route);
+              }}
+              style={({ pressed }) => [styles.item, elevation.card, unread && styles.unread, pressed && { opacity: 0.85 }]}
+            >
+              <View style={[styles.icon, unread && { backgroundColor: colors.primarySoft }]}>
+                <Ionicons name={unread ? 'notifications' : 'notifications-outline'} size={18} color={unread ? colors.primary : colors.textDim} />
               </View>
-              <Muted>{n.message}</Muted>
-              <Text style={styles.time}>
-                {new Date(n.createdAt).toLocaleString()}
-              </Text>
-            </Card>
-          </Pressable>
-        ))}
-        {!items.length && <Muted>No tienes notificaciones.</Muted>}
-      </ScrollView>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={[styles.title, unread && { fontWeight: '700' }]} numberOfLines={2}>
+                  {n.title}
+                </Text>
+                <Text style={styles.message} numberOfLines={3}>
+                  {n.message}
+                </Text>
+                <Text style={styles.time}>{formatRelativeDay(n.createdAt)}</Text>
+              </View>
+              {unread ? <View style={styles.dot} /> : null}
+            </Pressable>
+          );
+        }}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: spacing.lg, gap: spacing.md },
-  item: { gap: 6 },
-  unread: { borderColor: colors.borderStrong },
-  itemHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  itemTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primaryBright },
-  time: { color: colors.textDim, fontSize: 11 },
+  content: { padding: spacing.lg, flexGrow: 1 },
+  item: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
+  },
+  unread: { borderLeftWidth: 3, borderLeftColor: colors.primary },
+  icon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: { color: colors.text, fontSize: 15, fontWeight: '600' },
+  message: { color: colors.textMuted, fontSize: 14, lineHeight: 19 },
+  time: { color: colors.textDim, fontSize: 12, marginTop: 2 },
+  dot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.primary, marginTop: 6 },
 });
