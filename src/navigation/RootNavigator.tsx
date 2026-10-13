@@ -73,11 +73,11 @@ function MainTabs() {
     <Tabs.Navigator
       screenOptions={{
         headerShown: false,
+        // Sin altura fija: react-navigation suma el inset inferior del sistema
+        // (barra de gestos/botones). Con height fija la barra quedaba tapada.
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
-          height: undefined,
-          paddingTop: 6,
         },
         tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
         tabBarActiveTintColor: colors.primary,

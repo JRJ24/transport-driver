@@ -47,6 +47,8 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
+    "dev": "node scripts/dev.js",
+    "dev:clean": "node scripts/dev.js -c",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

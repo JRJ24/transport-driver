@@ -5,7 +5,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { Badge, EmptyState, ErrorBanner, IconButton, Muted, Skeleton, type IconName } from '@/components/ui';
+import { Avatar, Badge, EmptyState, ErrorBanner, IconButton, Muted, Skeleton, type IconName } from '@/components/ui';
+import { goToTab } from '@/navigation/ref';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { ActiveTripBanner, OrderCard } from '@/components/OrderCard';
 import { colors, spacing, typography } from '@/theme/theme';
@@ -98,6 +99,7 @@ export function TasksScreen() {
           badge={unread}
           onPress={() => navigation.navigate('Notifications')}
         />
+        <Avatar name={user?.fullName} uri={user?.avatarUrl} size={44} onPress={() => goToTab('Perfil')} />
       </View>
       <ActiveTripBanner />
       <SegmentedControl
