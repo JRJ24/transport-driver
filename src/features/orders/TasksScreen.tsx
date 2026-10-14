@@ -1,186 +1,178 @@
-import React, { useCallback, useEffect } from 'react';
-import {
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Button, Card, Eyebrow, Muted, Pill } from '@/components/ui';
-import { colors, radius, spacing } from '@/theme/theme';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Avatar, Badge, EmptyState, ErrorBanner, IconButton, Muted, Skeleton, type IconName } from '@/components/ui';
+import { goToTab } from '@/navigation/ref';
+import { SegmentedControl } from '@/components/SegmentedControl';
+import { ActiveTripBanner, OrderCard } from '@/components/OrderCard';
+import { spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { useOrders } from '@/store/order.store';
 import { useNotifications } from '@/store/notifications.store';
-import type { Assignment } from '@/types/api';
+import { useAuth } from '@/store/auth.store';
+import { useTrip } from '@/store/trip.store';
+import { driverStatusLabels } from '@/constants/status.constants';
+import { bucketLabels, groupAssignments, type OrderBucket } from '@/utils/orders';
+import { firstName, greeting } from '@/utils/format';
 import type { InicioStackParamList } from '@/navigation/types';
-import { assignmentStatusLabels } from '@/constants/status.constants';
+import type { Assignment } from '@/types/api';
 
 type Nav = NativeStackNavigationProp<InicioStackParamList, 'Tasks'>;
 
-function firstStop(a: Assignment): string {
-  const stops = a.order?.orderStops ?? [];
-  const pickup = stops.find((s) => s.stopType === 'PICKUP') ?? stops[0];
-  return pickup ? `${pickup.addressLine}, ${pickup.city}` : 'Origen no disponible';
-}
+const EMPTY: Record<OrderBucket, { icon: IconName; title: string; message: string }> = {
+  assigned: {
+    icon: 'file-tray-outline',
+    title: 'Sin órdenes asignadas',
+    message: 'Cuando operaciones te asigne un viaje aparecerá aquí. Mantente disponible para recibir ofertas.',
+  },
+  inRoute: {
+    icon: 'navigate-outline',
+    title: 'Nada en ruta',
+    message: 'Inicia una orden asignada y la verás aquí mientras la entregas.',
+  },
+  delivered: {
+    icon: 'checkmark-done-outline',
+    title: 'Aún no hay entregas',
+    message: 'Tus entregas completadas quedarán guardadas aquí.',
+  },
+};
 
 export function TasksScreen() {
+  const styles = useStyles();
+  const { colors } = useTheme();
   const navigation = useNavigation<Nav>();
-  const { assignments, loadingList, loadAssignments } = useOrders();
+  const assignments = useOrders((s) => s.assignments);
+  const loaded = useOrders((s) => s.loaded);
+  const refreshing = useOrders((s) => s.refreshing);
+  const error = useOrders((s) => s.error);
+  const loadAssignments = useOrders((s) => s.loadAssignments);
   const unread = useNotifications((s) => s.unreadCount);
   const loadNotifications = useNotifications((s) => s.load);
+  const user = useAuth((s) => s.user);
+  const driver = useAuth((s) => s.driver);
+  const tripOrderId = useTrip((s) => s.order?.id);
+
+  const groups = useMemo(() => groupAssignments(assignments), [assignments]);
+  const [tab, setTab] = useState<OrderBucket>('assigned');
+
+  // Con un servicio en curso, la lista abre en «En ruta».
+  useEffect(() => {
+    if (tripOrderId) setTab('inRoute');
+  }, [tripOrderId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadAssignments();
+      void loadNotifications();
+    }, [loadAssignments, loadNotifications]),
+  );
 
   const refresh = useCallback(() => {
-    void loadAssignments();
+    void loadAssignments({ visible: true });
     void loadNotifications();
   }, [loadAssignments, loadNotifications]);
 
-  useEffect(refresh, [refresh]);
+  const data = groups[tab];
+  const available = driver?.availabilityStatus === 'AVAILABLE';
+  const statusTone = available ? 'success' : driver?.availabilityStatus === 'BUSY' ? 'primary' : 'neutral';
 
-  const active = assignments.filter(
-    (a) => a.assignmentStatus === 'PENDING' || a.assignmentStatus === 'ACCEPTED',
+  const header = (
+    <View style={styles.headerBlock}>
+      <View style={styles.header}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.hello} numberOfLines={1}>
+            {greeting()}, {firstName(user?.fullName) || 'conductor'}
+          </Text>
+          <View style={styles.statusRow}>
+            <Badge
+              label={driver ? driverStatusLabels[driver.availabilityStatus] : 'Sin perfil'}
+              tone={statusTone}
+              pulse={available}
+            />
+            {groups.assigned.length ? <Muted>{groups.assigned.length} por hacer</Muted> : null}
+          </View>
+        </View>
+        <IconButton
+          icon="notifications-outline"
+          accessibilityLabel="Notificaciones"
+          badge={unread}
+          onPress={() => navigation.navigate('Notifications')}
+        />
+        <Avatar name={user?.fullName} uri={user?.avatarUrl} size={44} onPress={() => goToTab('Perfil')} />
+      </View>
+      <ActiveTripBanner />
+      <SegmentedControl
+        value={tab}
+        onChange={setTab}
+        segments={(['assigned', 'inRoute', 'delivered'] as OrderBucket[]).map((key) => ({
+          key,
+          label: bucketLabels[key],
+          count: groups[key].length,
+        }))}
+      />
+      {error ? <ErrorBanner message={error} onRetry={refresh} /> : null}
+    </View>
   );
-  const next = active[0];
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
-      <StatusBar style="light" />
-      <ScrollView
+      <FlatList<Assignment>
+        data={loaded ? data : []}
+        keyExtractor={(a) => a.id}
         contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl
-            refreshing={loadingList}
-            onRefresh={refresh}
-            tintColor={colors.primaryBright}
-          />
-        }
-      >
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.title}>Siguiente tarea</Text>
-            <Muted>{`Turno · ${active.length} parada${active.length === 1 ? '' : 's'}`}</Muted>
-          </View>
-          <Pressable
-            style={styles.bell}
-            onPress={() => navigation.navigate('Notifications')}
-          >
-            <Text style={styles.bellIcon}>🔔</Text>
-            {unread > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{unread}</Text>
-              </View>
-            )}
-          </Pressable>
-        </View>
-
-        {next ? (
-          <Card style={styles.nextCard}>
-            <View style={styles.nextRow}>
-              <Pill tone={next.assignmentStatus === 'PENDING' ? 'warning' : 'primary'}>
-                {next.assignmentStatus === 'PENDING' ? 'Por aceptar' : 'Recoger ahora'}
-              </Pill>
-              <Text style={styles.eta}>{next.order?.estimatedDurationMin ?? '--'} min</Text>
-            </View>
-            <Text style={styles.orderCode}>{next.order?.orderCode ?? next.orderId}</Text>
-            <Muted>{firstStop(next)}</Muted>
-            <Button
-              label={next.assignmentStatus === 'PENDING' ? 'Aceptar y ver' : 'Ver orden'}
-              onPress={() =>
-                navigation.navigate('OrderDetail', { orderId: next.orderId })
-              }
+        ListHeaderComponent={header}
+        ItemSeparatorComponent={Separator}
+        renderItem={({ item, index }) => (
+          <Animated.View entering={FadeInDown.delay(Math.min(index, 6) * 50).springify().damping(18)}>
+            <OrderCard
+              assignment={item}
+              onPress={() => navigation.navigate('OrderDetail', { orderId: item.orderId })}
             />
-          </Card>
-        ) : (
-          <Card>
-            <Eyebrow>Sin tareas</Eyebrow>
-            <Muted>No tienes órdenes asignadas por ahora.</Muted>
-          </Card>
+          </Animated.View>
         )}
-
-        <Eyebrow>Asignaciones</Eyebrow>
-        {assignments.map((a) => (
-          <Pressable
-            key={a.id}
-            onPress={() => navigation.navigate('OrderDetail', { orderId: a.orderId })}
-          >
-            <Card style={styles.assignment}>
-              <View style={styles.assignmentRow}>
-                <Text style={styles.assignmentCode}>
-                  {a.order?.orderCode ?? a.orderId}
-                </Text>
-                <Pill
-                  tone={
-                    a.assignmentStatus === 'ACCEPTED'
-                      ? 'success'
-                      : a.assignmentStatus === 'PENDING'
-                        ? 'warning'
-                        : 'neutral'
-                  }
-                >
-                  {assignmentStatusLabels[a.assignmentStatus]}
-                </Pill>
-              </View>
-              <Muted>{firstStop(a)}</Muted>
-            </Card>
-          </Pressable>
-        ))}
-        {!assignments.length && !loadingList && (
-          <Muted>No hay asignaciones disponibles.</Muted>
-        )}
-      </ScrollView>
+        ListEmptyComponent={
+          !loaded ? (
+            <View style={{ gap: spacing.md }}>
+              {[0, 1, 2].map((i) => (
+                <View key={i} style={styles.skeletonCard}>
+                  <Skeleton width={110} height={20} />
+                  <Skeleton height={16} />
+                  <Skeleton width="70%" height={16} />
+                </View>
+              ))}
+            </View>
+          ) : (
+            <EmptyState {...EMPTY[tab]} />
+          )
+        }
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.primary} colors={[colors.primary]} />
+        }
+      />
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+function Separator() {
+  return <View style={{ height: spacing.md }} />;
+}
+
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  title: { color: colors.text, fontSize: 28, fontWeight: '900', letterSpacing: -0.8 },
-  bell: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
+  content: { padding: spacing.lg, paddingBottom: spacing.xxxl },
+  headerBlock: { gap: spacing.lg, marginBottom: spacing.lg },
+  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  hello: { ...typography.display },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 6 },
+  skeletonCard: {
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: 18,
+    padding: spacing.lg,
+    gap: spacing.md,
   },
-  bellIcon: { fontSize: 18 },
-  badge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 4,
-    borderRadius: 9,
-    backgroundColor: colors.danger,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeText: { color: '#fff', fontSize: 10, fontWeight: '900' },
-  nextCard: { borderColor: colors.borderStrong },
-  nextRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  eta: { color: colors.text, fontSize: 16, fontWeight: '900' },
-  orderCode: { color: colors.text, fontSize: 22, fontWeight: '900' },
-  assignment: { gap: 6, padding: spacing.md },
-  assignmentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  assignmentCode: { color: colors.text, fontSize: 14, fontWeight: '800' },
-});
+}),
+);

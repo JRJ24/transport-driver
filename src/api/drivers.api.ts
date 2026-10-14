@@ -18,6 +18,15 @@ export const driversApi = {
     return unwrap(res.data);
   },
 
+  /** Rechaza una asignacion pendiente: la orden vuelve al despacho. */
+  async rejectAssignment(assignmentId: string): Promise<Assignment> {
+    const res = await http.patch<ApiResponse<Assignment>>(
+      `/assignments/${assignmentId}/reject`,
+      {},
+    );
+    return unwrap(res.data);
+  },
+
   async updateStatus(
     driverId: string,
     availabilityStatus: DriverStatus,

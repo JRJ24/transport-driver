@@ -1,17 +1,9 @@
 import { create } from 'zustand';
 import { driversApi } from '@/api/drivers.api';
 import { ordersApi } from '@/api/orders.api';
-import { toErrorMessage } from '@/api/client';
-import type {
-  Assignment,
-  AssignmentStatus,
-  ComputedRoute,
-  OrderApproachRoute,
-  OrderStatus,
-  TransportOrder,
-} from '@/types/api';
-import { appStorage, STORAGE_KEYS } from '@/services/storage/app-storage';
+import type { Assignment, AssignmentStatus, OrderStatus } from '@/types/api';
 import { socketService } from '@/services/socket/socket.service';
+import { friendlyError } from '@/utils/errors';
 
 const CLOSED_ASSIGNMENTS: ReadonlySet<AssignmentStatus> = new Set([
   'REJECTED',
@@ -24,15 +16,11 @@ const CLOSED_ORDERS: ReadonlySet<OrderStatus> = new Set([
   'FAILED',
 ]);
 
-// El servidor emite order.status.changed solo a order:{id}, no a driver:{id}:
-// sin estar en la room de cada orden asignada, una cancelacion desde el TMS
-// de una orden que no esta abierta no llega.
+// El servidor emite order.status.changed a order:{id}: sin estar en la room de
+// cada orden asignada, una cancelacion desde el TMS no llega.
 let watchedOrderIds = new Set<string>();
 
-function watchAssignedOrders(
-  assignments: Assignment[],
-  activeOrderId: string | undefined,
-): void {
+function watchAssignedOrders(assignments: Assignment[], pinnedOrderId: string | null): void {
   const next = new Set(
     assignments
       .filter(
@@ -43,7 +31,7 @@ function watchAssignedOrders(
       .map((a) => a.orderId),
   );
   watchedOrderIds.forEach((orderId) => {
-    if (!next.has(orderId) && orderId !== activeOrderId) {
+    if (!next.has(orderId) && orderId !== pinnedOrderId) {
       socketService.leaveOrder(orderId);
     }
   });
@@ -51,133 +39,62 @@ function watchAssignedOrders(
   watchedOrderIds = next;
 }
 
+export function isWatchedOrder(orderId: string): boolean {
+  return watchedOrderIds.has(orderId);
+}
+
+/**
+ * Lista de asignaciones del conductor. Ya NO guarda «la orden activa»: ver
+ * el detalle de una orden no cambia el servicio en curso (eso es useTrip).
+ */
 interface OrderState {
   assignments: Assignment[];
-  activeOrder: TransportOrder | null;
-  route: ComputedRoute | null;
-  /** Tramo del conductor a la parada. No se persiste: caduca al moverse. */
-  approach: OrderApproachRoute | null;
-  loadingList: boolean;
-  loadingOrder: boolean;
+  loaded: boolean;
+  /** Recarga visible (pull-to-refresh). Las recargas por socket no la tocan. */
+  refreshing: boolean;
   error: string | null;
+  /** Orden del servicio activo: nunca se sale de su room. */
+  pinnedOrderId: string | null;
 
-  loadAssignments: () => Promise<void>;
-  selectOrder: (orderId: string) => Promise<void>;
-  refreshRoute: () => Promise<void>;
-  refreshApproach: () => Promise<void>;
+  loadAssignments: (opts?: { visible?: boolean }) => Promise<void>;
   accept: (orderId: string) => Promise<void>;
-  updateStatus: (orderId: string, status: OrderStatus) => Promise<void>;
-  hydrateFromCache: () => Promise<void>;
-  clearActive: () => Promise<void>;
+  setPinnedOrder: (orderId: string | null) => void;
+  reset: () => void;
 }
 
 export const useOrders = create<OrderState>((set, get) => ({
   assignments: [],
-  activeOrder: null,
-  route: null,
-  approach: null,
-  loadingList: false,
-  loadingOrder: false,
+  loaded: false,
+  refreshing: false,
   error: null,
+  pinnedOrderId: null,
 
-  async loadAssignments() {
-    set({ loadingList: true, error: null });
+  async loadAssignments(opts) {
+    if (opts?.visible) set({ refreshing: true });
     try {
       const assignments = await driversApi.myAssignments();
-      set({ assignments, loadingList: false });
-      watchAssignedOrders(assignments, get().activeOrder?.id);
+      set({ assignments, loaded: true, error: null });
+      watchAssignedOrders(assignments, get().pinnedOrderId);
     } catch (error) {
-      set({ loadingList: false, error: toErrorMessage(error) });
+      set({ error: friendlyError(error, 'No pudimos cargar tus órdenes.') });
+    } finally {
+      if (opts?.visible) set({ refreshing: false });
     }
-  },
-
-  async selectOrder(orderId) {
-    set({ loadingOrder: true, error: null });
-    try {
-      const order = await ordersApi.detail(orderId);
-      const previousOrderId = get().activeOrder?.id;
-      if (
-        previousOrderId &&
-        previousOrderId !== orderId &&
-        !watchedOrderIds.has(previousOrderId)
-      ) {
-        socketService.leaveOrder(previousOrderId);
-      }
-      set({ activeOrder: order });
-      socketService.joinOrder(orderId);
-      await appStorage.set(STORAGE_KEYS.activeOrder, order);
-
-      const route = await ordersApi.route(orderId).catch(() => null);
-      set({ route, loadingOrder: false });
-      if (route) {
-        await appStorage.set(STORAGE_KEYS.activeRoute, route);
-      }
-
-      await get().refreshApproach();
-    } catch (error) {
-      set({ loadingOrder: false, error: toErrorMessage(error) });
-    }
-  },
-
-  async refreshRoute() {
-    const order = get().activeOrder;
-    if (!order) {
-      return;
-    }
-    const route = await ordersApi.route(order.id).catch(() => null);
-    if (route) {
-      set({ route });
-      await appStorage.set(STORAGE_KEYS.activeRoute, route);
-    }
-  },
-
-  /**
-   * Tramo hasta la parada que toca.
-   *
-   * No se cachea en disco como la ruta: depende de donde este el conductor, y
-   * un valor viejo dibujaria la linea saliendo de un sitio donde ya no esta.
-   * El backend solo llama a Google cuando el conductor se alejo mas de 200 m.
-   */
-  async refreshApproach() {
-    const order = get().activeOrder;
-    if (!order) {
-      return;
-    }
-    set({ approach: await ordersApi.approach(order.id).catch(() => null) });
   },
 
   async accept(orderId) {
     await ordersApi.accept(orderId);
     await get().loadAssignments();
-    await get().selectOrder(orderId);
   },
 
-  async updateStatus(orderId, status) {
-    const order = await ordersApi.updateStatus(orderId, status);
-    set({ activeOrder: order });
-    await appStorage.set(STORAGE_KEYS.activeOrder, order);
+  setPinnedOrder(orderId) {
+    set({ pinnedOrderId: orderId });
+    if (orderId) socketService.joinOrder(orderId);
   },
 
-  async hydrateFromCache() {
-    const [order, route] = await Promise.all([
-      appStorage.get<TransportOrder>(STORAGE_KEYS.activeOrder),
-      appStorage.get<ComputedRoute>(STORAGE_KEYS.activeRoute),
-    ]);
-    if (order) {
-      set({ activeOrder: order, route });
-      // Sin esto, tras reabrir la app no llega una cancelacion de la orden
-      // activa hasta entrar al detalle. El Set lo guarda hasta que conecte.
-      socketService.joinOrder(order.id);
-    }
-  },
-
-  async clearActive() {
-    const orderId = get().activeOrder?.id;
-    if (orderId && !watchedOrderIds.has(orderId)) {
-      socketService.leaveOrder(orderId);
-    }
-    set({ activeOrder: null, route: null, approach: null });
-    await appStorage.remove(STORAGE_KEYS.activeOrder);
-    await appStorage.remove(STORAGE_KEYS.activeRoute);
+  reset() {
+    watchedOrderIds.forEach((id) => socketService.leaveOrder(id));
+    watchedOrderIds = new Set();
+    set({ assignments: [], loaded: false, refreshing: false, error: null, pinnedOrderId: null });
   },
 }));

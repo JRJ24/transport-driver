@@ -1,430 +1,472 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
   Image,
-  PanResponder,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
-  type LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { File, Paths } from 'expo-file-system';
-import { Button, Card, Eyebrow, Muted, Pill } from '@/components/ui';
-import { attachmentsApi, type UploadableFile } from '@/api/attachments.api';
+import { Ionicons } from '@expo/vector-icons';
+import Animated, { FadeIn, SlideInRight } from 'react-native-reanimated';
+import { Button, Card, IconButton, KeyValue, Muted, TextField } from '@/components/ui';
+import { SwipeButton } from '@/components/SwipeButton';
+import { StepIndicator } from '@/components/OrderCard';
+import { radius, spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
+import { attachmentsApi } from '@/api/attachments.api';
 import { deliveryProofsApi } from '@/api/delivery-proofs.api';
-import { toErrorMessage } from '@/api/client';
-import { colors, radius, spacing } from '@/theme/theme';
-import { useOrders } from '@/store/order.store';
+import { useEvidence, type Stroke } from '@/store/evidence.store';
+import { useTrip } from '@/store/trip.store';
 import { useTracking } from '@/store/tracking.store';
-import type { LatLng, OrderStop } from '@/types/api';
+import { toast } from '@/store/toast.store';
+import type { RootStackParamList } from '@/navigation/types';
+import type { LatLng } from '@/types/api';
+import { friendlyError } from '@/utils/errors';
+import { evidenceStatus } from '@/utils/evidence';
+import { haptic } from '@/utils/feedback';
+import { stopPoint } from '@/utils/geo';
+import { dropoffStop, stopAddress } from '@/utils/orders';
+import { buildSignatureSvg, SignaturePad } from './SignaturePad';
 
-type Point = { x: number; y: number };
-type Stroke = Point[];
+type Nav = NativeStackNavigationProp<RootStackParamList, 'Evidence'>;
 
-interface CapturedPhoto extends UploadableFile {
-  width?: number;
-  height?: number;
-}
+const STEPS = ['Receptor', 'Foto', 'Firma', 'Confirmar'];
 
-const SIGNATURE_WIDTH = 620;
-const SIGNATURE_HEIGHT = 260;
-
+/**
+ * Paso obligatorio para cerrar la entrega: receptor → foto → firma →
+ * confirmar. «Completar entrega» solo existe al final de este flujo.
+ */
 export function EvidenceScreen() {
-  const activeOrder = useOrders((s) => s.activeOrder);
-  const refreshOrder = useOrders((s) => s.selectOrder);
+  const styles = useStyles();
+  const { colors, typography } = useTheme();
+  const navigation = useNavigation<Nav>();
+  const { orderId } = useRoute<RouteProp<RootStackParamList, 'Evidence'>>().params;
+  const order = useTrip((s) => (s.order?.id === orderId ? s.order : null));
+  const complete = useTrip((s) => s.complete);
   const lastFix = useTracking((s) => s.lastFix);
-  const [recipientName, setRecipientName] = useState('');
-  const [recipientDocument, setRecipientDocument] = useState('');
-  const [notes, setNotes] = useState('');
-  const [photo, setPhoto] = useState<CapturedPhoto | null>(null);
-  const [strokes, setStrokes] = useState<Stroke[]>([]);
-  const [signatureSize, setSignatureSize] = useState({
-    width: SIGNATURE_WIDTH,
-    height: SIGNATURE_HEIGHT,
-  });
-  const [busy, setBusy] = useState(false);
-  const [sentProofId, setSentProofId] = useState<string | null>(null);
+  const draft = useEvidence((s) => s.draft);
+  const load = useEvidence((s) => s.load);
+  const update = useEvidence((s) => s.update);
+  const clearDraft = useEvidence((s) => s.clear);
 
-  const hasSignature = strokes.some((stroke) => stroke.length > 1);
+  const [step, setStep] = useState(0);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [serverReady, setServerReady] = useState(false);
+  const [touched, setTouched] = useState(false);
 
-  async function capturePhoto() {
+  useEffect(() => {
+    void load(orderId).then((d) => {
+      // Retomar donde se quedo.
+      if (d.recipientName && d.photo && d.strokes.length) setStep(3);
+      else if (d.recipientName && d.photo) setStep(2);
+      else if (d.recipientName) setStep(1);
+    });
+    // Si la evidencia ya esta en el servidor, solo falta confirmar.
+    void deliveryProofsApi
+      .bundle(orderId)
+      .then((bundle) => {
+        if (evidenceStatus(bundle).ready) {
+          setServerReady(true);
+          setStep(3);
+        }
+      })
+      .catch(() => undefined);
+  }, [orderId, load]);
+
+  const setStrokes = useCallback((strokes: Stroke[]) => update({ strokes, signatureSaved: false }), [update]);
+
+  if (!draft || draft.orderId !== orderId) {
+    return <View style={styles.screen} />;
+  }
+
+  const nameError = touched && draft.recipientName.trim().length < 3 ? 'Escribe el nombre de quien recibe.' : null;
+  const hasSignature = draft.strokes.some((s) => s.length > 2);
+
+  async function takePhoto() {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permiso requerido', 'Activa la cámara para capturar evidencia.');
+      toast.error('Permiso de cámara', 'Activa la cámara para capturar la evidencia.');
       return;
     }
-
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      quality: 0.82,
-      allowsEditing: false,
-    });
-
-    if (result.canceled) {
-      return;
-    }
-
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.85 });
+    if (result.canceled) return;
     const asset = result.assets[0];
-    setPhoto({
-      uri: asset.uri,
-      name: asset.fileName ?? `evidence-${Date.now()}.jpg`,
-      type: asset.mimeType ?? 'image/jpeg',
-      width: asset.width,
-      height: asset.height,
+    haptic.success();
+    update({
+      photo: {
+        uri: asset.uri,
+        name: `entrega-${Date.now()}.jpg`,
+        type: asset.mimeType ?? 'image/jpeg',
+        width: asset.width,
+        height: asset.height,
+      },
+      photoUploaded: false,
     });
   }
 
-  async function submitEvidence() {
-    if (!activeOrder) {
-      Alert.alert('Sin orden activa', 'Selecciona una orden antes de enviar evidencia.');
-      return;
-    }
-    if (!recipientName.trim() || !recipientDocument.trim()) {
-      Alert.alert('Datos requeridos', 'Completa receptor y documento.');
-      return;
-    }
-    if (!photo) {
-      Alert.alert('Foto requerida', 'Captura una foto de entrega.');
-      return;
-    }
-    if (!hasSignature) {
-      Alert.alert('Firma requerida', 'Solicita la firma del receptor.');
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const location = await resolveEvidenceLocation(activeOrder.orderStops ?? [], lastFix);
-      const proof = await deliveryProofsApi.create({
-        orderId: activeOrder.id,
-        proofType: 'MIXED',
-        recipientName: recipientName.trim(),
-        recipientDocument: recipientDocument.trim(),
-        notes: notes.trim() || undefined,
-        latitude: location.latitude,
-        longitude: location.longitude,
-      });
-
-      const signatureFile = createSignatureFile(strokes, signatureSize);
-      const uploads = await attachmentsApi.upload({
-        entityType: 'DeliveryProof',
-        entityId: proof.id,
-        files: [photo, signatureFile],
-      });
-      const signatureUpload =
-        uploads.find((item) =>
-          item.file.originalName.toLowerCase().includes('signature'),
-        ) ?? uploads[1];
-
-      if (signatureUpload) {
-        await deliveryProofsApi.addSignature(proof.id, {
-          signatureUrl: signatureUpload.file.url,
-          signerName: recipientName.trim(),
-        });
+  function next() {
+    if (step === 0) {
+      setTouched(true);
+      if (draft!.recipientName.trim().length < 3) {
+        haptic.warning();
+        return;
       }
+    }
+    if (step === 1 && !draft!.photo) {
+      toast.warning('Falta la foto', 'Toma una foto del paquete entregado.');
+      return;
+    }
+    if (step === 2 && !hasSignature) {
+      toast.warning('Falta la firma', 'Pide al receptor que firme en el recuadro.');
+      return;
+    }
+    haptic.tap();
+    setStep((s) => Math.min(3, s + 1));
+  }
 
-      setSentProofId(proof.id);
-      await refreshOrder(activeOrder.id).catch(() => undefined);
-      Alert.alert('Evidencia enviada', 'La prueba de entrega fue guardada correctamente.');
+  async function submit() {
+    if (!order) {
+      toast.error('Servicio no disponible', 'Esta orden ya no es tu servicio en curso.');
+      return;
+    }
+    const d = useEvidence.getState().draft!;
+    try {
+      if (!serverReady) {
+        let proofId = d.proofId;
+        if (!proofId) {
+          setProgress('Guardando datos del receptor…');
+          const where = await resolveLocation(lastFix, stopPoint(dropoffStop(order)));
+          const proof = await deliveryProofsApi.create({
+            orderId,
+            proofType: 'MIXED',
+            recipientName: d.recipientName.trim(),
+            recipientDocument: d.recipientDocument.trim(),
+            notes: d.notes.trim() || undefined,
+            latitude: where.latitude,
+            longitude: where.longitude,
+          });
+          proofId = proof.id;
+          update({ proofId });
+        }
+        if (!d.photoUploaded && d.photo) {
+          setProgress('Subiendo foto…');
+          const photo = await compressPhoto(d.photo.uri);
+          await attachmentsApi.upload({ entityType: 'DeliveryProof', entityId: proofId, files: [photo] });
+          update({ photoUploaded: true });
+        }
+        if (!d.signatureSaved) {
+          setProgress('Guardando firma…');
+          const file = new File(Paths.cache, `signature-${Date.now()}.svg`);
+          file.create({ overwrite: true });
+          file.write(buildSignatureSvg(d.strokes, d.signatureSize));
+          const [upload] = await attachmentsApi.upload({
+            entityType: 'DeliveryProof',
+            entityId: proofId,
+            files: [{ uri: file.uri, name: file.name, type: 'image/svg+xml' }],
+          });
+          await deliveryProofsApi.addSignature(proofId, {
+            signatureUrl: upload.file.url,
+            signerName: d.recipientName.trim(),
+          });
+          update({ signatureSaved: true });
+          try {
+            file.delete();
+          } catch {
+            // El cache se limpia solo.
+          }
+        }
+      }
+      setProgress('Cerrando la entrega…');
+      const delivered = await complete();
+      await clearDraft();
+      navigation.replace('TripCompleted', {
+        orderCode: delivered.orderCode,
+        amount: delivered.totalAmount ?? null,
+        recipient: d.recipientName.trim() || undefined,
+      });
     } catch (error) {
-      Alert.alert('No se pudo enviar', toErrorMessage(error));
+      toast.error('No se pudo completar', `${friendlyError(error)} Tu evidencia queda guardada; puedes reintentar.`);
     } finally {
-      setBusy(false);
+      setProgress(null);
     }
   }
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <StatusBar style="light" />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.title}>Evidencia</Text>
-            <Muted>Foto, receptor, firma y ubicación para cerrar la entrega.</Muted>
-          </View>
-          {sentProofId ? <Pill tone="success">Enviada</Pill> : null}
+    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+      <View style={styles.header}>
+        <IconButton icon="close" accessibilityLabel="Cerrar" onPress={() => navigation.goBack()} size={40} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>Evidencia de entrega</Text>
+          <Muted>{order ? `${order.orderCode} · ${stopAddress(dropoffStop(order))}` : 'Orden'}</Muted>
         </View>
+      </View>
+      <View style={styles.steps}>
+        <StepIndicator steps={STEPS} current={step} />
+      </View>
 
-        {activeOrder ? (
-          <Card>
-            <Eyebrow>Orden {activeOrder.orderCode}</Eyebrow>
-            <Muted>{lastStopAddress(activeOrder.orderStops ?? [])}</Muted>
-          </Card>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        {step === 2 ? (
+          // La firma va fuera del ScrollView: ningun scroll le roba el trazo.
+          <Animated.View key="sign" entering={SlideInRight.springify().damping(20)} style={styles.body}>
+            <StepTitle icon="create-outline" title="Firma del receptor" subtitle="Pásale el teléfono a quien recibe y pídele que firme." />
+            <SignaturePad
+              strokes={draft.strokes}
+              onChange={setStrokes}
+              onSize={(signatureSize) => update({ signatureSize })}
+              height={260}
+            />
+            <View style={styles.signRow}>
+              <Muted>{hasSignature ? `Firmado por ${draft.recipientName}` : 'Firma dentro del recuadro'}</Muted>
+              <Pressable onPress={() => update({ strokes: [], signatureSaved: false })} hitSlop={10}>
+                <Text style={styles.link}>Borrar</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
         ) : (
-          <Card>
-            <Eyebrow>Sin servicio activo</Eyebrow>
-            <Muted>Inicia un servicio para capturar su evidencia.</Muted>
-          </Card>
+          <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+            {step === 0 ? (
+              <Animated.View key="who" entering={FadeIn} style={{ gap: spacing.lg }}>
+                <StepTitle icon="person-outline" title="¿Quién recibe?" subtitle="Registra a la persona que firma la entrega." />
+                <TextField
+                  label="Nombre completo"
+                  icon="person-outline"
+                  value={draft.recipientName}
+                  onChangeText={(recipientName) => update({ recipientName })}
+                  placeholder="Ej. María Pérez"
+                  autoCapitalize="words"
+                  error={nameError}
+                  returnKeyType="next"
+                />
+                <TextField
+                  label="Cédula o documento (opcional)"
+                  icon="card-outline"
+                  value={draft.recipientDocument}
+                  onChangeText={(recipientDocument) => update({ recipientDocument })}
+                  placeholder="000-0000000-0"
+                  keyboardType="default"
+                />
+                <TextField
+                  label="Notas (opcional)"
+                  icon="chatbubble-outline"
+                  value={draft.notes}
+                  onChangeText={(notes) => update({ notes })}
+                  placeholder="Ej. Se dejó en recepción"
+                  multiline
+                />
+              </Animated.View>
+            ) : null}
+
+            {step === 1 ? (
+              <Animated.View key="photo" entering={SlideInRight.springify().damping(20)} style={{ gap: spacing.lg }}>
+                <StepTitle icon="camera-outline" title="Foto de la entrega" subtitle="Que se vea el paquete en el lugar de entrega." />
+                {draft.photo ? (
+                  <View>
+                    <Image source={{ uri: draft.photo.uri }} style={styles.photo} />
+                    <View style={styles.photoOk}>
+                      <Ionicons name="checkmark-circle" size={18} color={colors.white} />
+                      <Text style={styles.photoOkText}>Foto lista</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <Pressable onPress={() => void takePhoto()} style={styles.photoEmpty} accessibilityRole="button">
+                    <View style={styles.cameraCircle}>
+                      <Ionicons name="camera" size={34} color={colors.primary} />
+                    </View>
+                    <Text style={typography.bodyStrong}>Tocar para abrir la cámara</Text>
+                    <Muted>Buena luz, paquete visible.</Muted>
+                  </Pressable>
+                )}
+                {draft.photo ? (
+                  <Button label="Repetir foto" icon="refresh" variant="secondary" size="md" onPress={() => void takePhoto()} />
+                ) : null}
+              </Animated.View>
+            ) : null}
+
+            {step === 3 ? (
+              <Animated.View key="confirm" entering={SlideInRight.springify().damping(20)} style={{ gap: spacing.lg }}>
+                <StepTitle
+                  icon="shield-checkmark-outline"
+                  title={serverReady ? 'Evidencia registrada' : 'Revisa y completa'}
+                  subtitle={
+                    serverReady
+                      ? 'La evidencia ya está en el sistema. Solo falta cerrar la entrega.'
+                      : 'Al completar enviamos la evidencia y cerramos la entrega.'
+                  }
+                />
+                {!serverReady ? (
+                  <Card>
+                    <KeyValue label="Recibe" value={draft.recipientName || '—'} />
+                    {draft.recipientDocument ? <KeyValue label="Documento" value={draft.recipientDocument} /> : null}
+                    <View style={styles.summaryRow}>
+                      {draft.photo ? <Image source={{ uri: draft.photo.uri }} style={styles.thumb} /> : null}
+                      <View style={styles.checks}>
+                        <Check ok={Boolean(draft.photo)} label="Foto de entrega" />
+                        <Check ok={hasSignature} label="Firma del receptor" />
+                        <Check ok label="Ubicación GPS" />
+                      </View>
+                    </View>
+                    <Pressable onPress={() => setStep(0)} hitSlop={8}>
+                      <Text style={styles.link}>Editar datos</Text>
+                    </Pressable>
+                  </Card>
+                ) : null}
+              </Animated.View>
+            ) : null}
+          </ScrollView>
         )}
 
-        <Card>
-          <Eyebrow>Receptor</Eyebrow>
-          <TextInput
-            style={styles.input}
-            placeholder="Nombre de quien recibe"
-            placeholderTextColor={colors.textDim}
-            value={recipientName}
-            onChangeText={setRecipientName}
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Documento / cédula / RNC"
-            placeholderTextColor={colors.textDim}
-            value={recipientDocument}
-            onChangeText={setRecipientDocument}
-          />
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="Notas opcionales"
-            placeholderTextColor={colors.textDim}
-            value={notes}
-            onChangeText={setNotes}
-            multiline
-          />
-        </Card>
-
-        <Card>
-          <Eyebrow>Foto de entrega</Eyebrow>
-          {photo ? (
-            <Image source={{ uri: photo.uri }} style={styles.photo} />
+        <View style={styles.footer}>
+          {step < 3 ? (
+            <View style={styles.footerRow}>
+              {step > 0 ? (
+                <Button label="Atrás" variant="secondary" onPress={() => setStep((s) => s - 1)} style={{ flex: 1 }} />
+              ) : null}
+              {step === 1 && !draft.photo ? (
+                <Button label="Tomar foto" icon="camera" onPress={() => void takePhoto()} style={{ flex: 2 }} />
+              ) : (
+                <Button label="Continuar" icon="arrow-forward" onPress={next} style={{ flex: 2 }} />
+              )}
+            </View>
           ) : (
-            <View style={styles.photoPlaceholder}>
-              <Text style={styles.photoIcon}>📷</Text>
-              <Muted>Captura el paquete, guía o punto de entrega.</Muted>
+            <View style={{ gap: spacing.sm }}>
+              {progress ? <Muted style={{ textAlign: 'center' }}>{progress}</Muted> : null}
+              <SwipeButton
+                label="Desliza para completar entrega"
+                tone="success"
+                icon="checkmark-done"
+                loading={Boolean(progress)}
+                disabled={!order}
+                onConfirm={() => void submit()}
+              />
             </View>
           )}
-          <Button
-            label={photo ? 'Repetir foto' : 'Tomar foto'}
-            tone="neutral"
-            onPress={() => void capturePhoto()}
-            disabled={!activeOrder || busy}
-          />
-        </Card>
-
-        <Card>
-          <View style={styles.sectionHeader}>
-            <Eyebrow>Firma del receptor</Eyebrow>
-            <Button
-              label="Limpiar"
-              tone="neutral"
-              onPress={() => setStrokes([])}
-              disabled={busy || strokes.length === 0}
-              style={styles.clearButton}
-            />
-          </View>
-          <SignaturePad
-            strokes={strokes}
-            onChange={setStrokes}
-            onSizeChange={setSignatureSize}
-          />
-          {!hasSignature ? <Muted>Dibuja la firma dentro del recuadro.</Muted> : null}
-        </Card>
-
-        <Button
-          label={busy ? 'Enviando evidencia...' : 'Enviar evidencia'}
-          loading={busy}
-          disabled={!activeOrder}
-          onPress={() => void submitEvidence()}
-        />
-      </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-function lastStopAddress(stops: OrderStop[]) {
-  const ordered = [...stops].sort((left, right) => left.sequence - right.sequence);
-  const stop = ordered.find((item) => item.stopType === 'DROPOFF') ?? ordered[ordered.length - 1];
-  return stop?.addressLine ?? 'Destino activo';
-}
-
-function SignaturePad({
-  strokes,
-  onChange,
-  onSizeChange,
-}: {
-  strokes: Stroke[];
-  onChange: React.Dispatch<React.SetStateAction<Stroke[]>>;
-  onSizeChange: (size: { width: number; height: number }) => void;
-}) {
-  const [size, setSize] = useState({ width: SIGNATURE_WIDTH, height: SIGNATURE_HEIGHT });
-  const responder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (event) => {
-          const point = clampPoint(event.nativeEvent.locationX, event.nativeEvent.locationY, size);
-          onChange((current) => [...current, [point]]);
-        },
-        onPanResponderMove: (event) => {
-          const point = clampPoint(event.nativeEvent.locationX, event.nativeEvent.locationY, size);
-          onChange((current) => {
-            if (current.length === 0) return [[point]];
-            const next = [...current];
-            next[next.length - 1] = [...next[next.length - 1], point];
-            return next;
-          });
-        },
-      }),
-    [onChange, size],
-  );
-
-  const onLayout = (event: LayoutChangeEvent) => {
-    const { width, height } = event.nativeEvent.layout;
-    const next = { width, height };
-    setSize(next);
-    onSizeChange(next);
-  };
-
+function StepTitle({ icon, title, subtitle }: { icon: React.ComponentProps<typeof Ionicons>['name']; title: string; subtitle: string }) {
+  const styles = useStyles();
+  const { colors, typography } = useTheme();
   return (
-    <View style={styles.signaturePad} onLayout={onLayout} {...responder.panHandlers}>
-      {strokes.flatMap((stroke, strokeIndex) =>
-        stroke.slice(1).map((point, index) => (
-          <View
-            key={`${strokeIndex}-${index}`}
-            style={[styles.signatureSegment, segmentStyle(stroke[index], point)]}
-          />
-        )),
-      )}
+    <View style={{ gap: 4 }}>
+      <View style={styles.stepIcon}>
+        <Ionicons name={icon} size={22} color={colors.primary} />
+      </View>
+      <Text style={typography.title}>{title}</Text>
+      <Muted>{subtitle}</Muted>
     </View>
   );
 }
 
-function createSignatureFile(
-  strokes: Stroke[],
-  size: { width: number; height: number },
-): UploadableFile {
-  const svg = buildSignatureSvg(strokes, size);
-  const file = new File(Paths.cache, `signature-${Date.now()}.svg`);
-  file.create({ overwrite: true });
-  file.write(svg);
-
-  return { uri: file.uri, name: file.name, type: 'image/svg+xml' };
+function Check({ ok, label }: { ok: boolean; label: string }) {
+  const { colors } = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      <Ionicons name={ok ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={ok ? colors.success : colors.textDim} />
+      <Text style={{ fontSize: 14, color: colors.text }}>{label}</Text>
+    </View>
+  );
 }
 
-function buildSignatureSvg(strokes: Stroke[], size: { width: number; height: number }) {
-  const paths = strokes
-    .filter((stroke) => stroke.length > 1)
-    .map((stroke) => {
-      const [first, ...rest] = stroke;
-      const d = [`M ${first.x.toFixed(1)} ${first.y.toFixed(1)}`]
-        .concat(rest.map((point) => `L ${point.x.toFixed(1)} ${point.y.toFixed(1)}`))
-        .join(' ');
-      return `<path d="${d}" fill="none" stroke="#0f172a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`;
-    })
-    .join('');
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size.width.toFixed(0)}" height="${size.height.toFixed(0)}" viewBox="0 0 ${size.width.toFixed(0)} ${size.height.toFixed(0)}"><rect width="100%" height="100%" fill="#ffffff"/>${paths}</svg>`;
+/** Foto a 1600 px en JPEG: sube en segundos por datos moviles. */
+async function compressPhoto(uri: string) {
+  try {
+    const ctx = ImageManipulator.manipulate(uri);
+    ctx.resize({ width: 1600 });
+    const image = await ctx.renderAsync();
+    const saved = await image.saveAsync({ compress: 0.7, format: SaveFormat.JPEG });
+    return { uri: saved.uri, name: `entrega-${Date.now()}.jpg`, type: 'image/jpeg' };
+  } catch {
+    return { uri, name: `entrega-${Date.now()}.jpg`, type: 'image/jpeg' };
+  }
 }
 
-function segmentStyle(start: Point, end: Point) {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const length = Math.sqrt(dx * dx + dy * dy);
-  const angle = Math.atan2(dy, dx);
-
-  return {
-    left: (start.x + end.x) / 2 - length / 2,
-    top: (start.y + end.y) / 2 - 2,
-    width: length,
-    transform: [{ rotateZ: `${angle}rad` }],
-  };
-}
-
-function clampPoint(x: number, y: number, size: { width: number; height: number }): Point {
-  return {
-    x: Math.max(0, Math.min(size.width, x)),
-    y: Math.max(0, Math.min(size.height, y)),
-  };
-}
-
-async function resolveEvidenceLocation(
-  stops: OrderStop[],
-  lastFix: LatLng | null,
-): Promise<LatLng> {
+async function resolveLocation(lastFix: LatLng | null, fallback: LatLng | null): Promise<LatLng> {
   if (lastFix) return lastFix;
-
-  const permission = await Location.requestForegroundPermissionsAsync();
-  if (permission.granted) {
-    const current = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-    });
-    return {
-      latitude: current.coords.latitude,
-      longitude: current.coords.longitude,
-    };
+  const perm = await Location.getForegroundPermissionsAsync();
+  if (perm.granted) {
+    const current = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+    ]).catch(() => null);
+    if (current) return { latitude: current.coords.latitude, longitude: current.coords.longitude };
   }
-
-  const ordered = [...stops].sort((left, right) => left.sequence - right.sequence);
-  const fallback =
-    ordered.find((stop) => stop.stopType === 'DROPOFF') ?? ordered[ordered.length - 1];
-  const latitude = Number(fallback?.latitude);
-  const longitude = Number(fallback?.longitude);
-  if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-    return { latitude, longitude };
-  }
-
+  if (fallback) return fallback;
   throw new Error('No hay ubicación disponible para la evidencia.');
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
-  header: {
+  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
+  title: { fontSize: 18, fontWeight: '700', color: colors.text },
+  steps: { paddingHorizontal: spacing.lg, paddingVertical: spacing.lg },
+  body: { padding: spacing.lg, gap: spacing.lg, flexGrow: 1 },
+  stepIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  photo: { width: '100%', aspectRatio: 4 / 3, borderRadius: radius.lg, backgroundColor: colors.surfaceAlt },
+  photoOk: {
+    position: 'absolute',
+    left: spacing.md,
+    bottom: spacing.md,
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.md,
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.success,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
   },
-  title: { color: colors.text, fontSize: 28, fontWeight: '900' },
-  input: {
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceAlt,
-    paddingHorizontal: spacing.md,
-    color: colors.text,
-    fontSize: 14,
-  },
-  textArea: { minHeight: 90, paddingTop: spacing.md, textAlignVertical: 'top' },
-  photo: { width: '100%', height: 220, borderRadius: radius.md, backgroundColor: colors.surfaceAlt },
-  photoPlaceholder: {
-    minHeight: 170,
+  photoOkText: { color: colors.white, fontWeight: '700', fontSize: 13 },
+  photoEmpty: {
+    aspectRatio: 4 / 3,
+    borderRadius: radius.lg,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceAlt,
   },
-  photoIcon: { fontSize: 34 },
-  sectionHeader: {
-    flexDirection: 'row',
+  cameraCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.primarySoft,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
+    justifyContent: 'center',
   },
-  clearButton: { minHeight: 34, paddingHorizontal: spacing.md },
-  signaturePad: {
-    height: 190,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    borderRadius: radius.md,
-    backgroundColor: '#fff',
+  signRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  link: { color: colors.primaryText, fontWeight: '700', fontSize: 14 },
+  summaryRow: { flexDirection: 'row', gap: spacing.md, alignItems: 'center' },
+  thumb: { width: 72, height: 72, borderRadius: radius.sm },
+  checks: { gap: 6, flex: 1 },
+  footer: {
+    padding: spacing.lg,
+    backgroundColor: colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
-  signatureSegment: {
-    position: 'absolute',
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#0f172a',
-  },
-});
+  footerRow: { flexDirection: 'row', gap: spacing.sm },
+}),
+);

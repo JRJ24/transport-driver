@@ -2,8 +2,9 @@ import axios from 'axios';
 import { create } from 'zustand';
 import { authApi } from '@/api/auth.api';
 import { driversApi } from '@/api/drivers.api';
+import { usersApi } from '@/api/users.api';
 import { apiClient, toErrorMessage } from '@/api/client';
-import type { ApiError, AuthUser, DriverProfile } from '@/types/api';
+import type { ApiError, AuthUser, DriverProfile, UserProfile } from '@/types/api';
 import { secureStorage } from '@/services/storage/secure-storage';
 import { appStorage } from '@/services/storage/app-storage';
 import { pushNotifications } from '@/services/notifications/push-notifications.service';
@@ -24,6 +25,9 @@ interface AuthState {
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
   setDriver: (driver: DriverProfile | null) => void;
+  /** Datos editables (telefono, foto) desde GET /users/me. */
+  refreshProfile: () => Promise<void>;
+  applyProfile: (profile: Partial<UserProfile>) => void;
 }
 
 interface CachedProfile {
@@ -149,6 +153,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       set({ status: 'authenticated', user, driver, error: null });
       cacheProfile(user, driver);
       void pushNotifications.register().catch(() => undefined);
+      void get().refreshProfile();
     } catch (error) {
       if (epoch !== sessionEpoch) {
         return;
@@ -209,6 +214,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       set({ status: 'authenticated', user: result.user, driver });
       cacheProfile(result.user, driver);
       void pushNotifications.register().catch(() => undefined);
+      void get().refreshProfile();
       return true;
     } catch (error) {
       set({ status: 'unauthenticated', error: toErrorMessage(error) });
@@ -226,6 +232,28 @@ export const useAuth = create<AuthState>((set, get) => ({
     if (user) {
       cacheProfile(user, driver);
     }
+  },
+
+  async refreshProfile() {
+    const epoch = sessionEpoch;
+    const profile = await usersApi.me().catch(() => null);
+    if (profile && epoch === sessionEpoch && get().status === 'authenticated') {
+      get().applyProfile(profile);
+    }
+  },
+
+  applyProfile(profile) {
+    const { user, driver } = get();
+    if (!user) return;
+    const next: AuthUser = {
+      ...user,
+      ...(profile.fullName !== undefined ? { fullName: profile.fullName } : {}),
+      ...(profile.email !== undefined ? { email: profile.email } : {}),
+      ...(profile.phone !== undefined ? { phone: profile.phone ?? '' } : {}),
+      ...(profile.avatarUrl !== undefined ? { avatarUrl: profile.avatarUrl } : {}),
+    };
+    set({ user: next });
+    cacheProfile(next, driver);
   },
 }));
 

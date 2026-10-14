@@ -8,7 +8,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   version: '1.0.0',
   orientation: 'portrait',
   icon: './src/assets/icon.png',
-  userInterfaceStyle: 'dark',
+  // El tema lo elige el conductor en Perfil; «Automatico» sigue al sistema.
+  userInterfaceStyle: 'automatic',
   scheme: 'rutardriver',
 
   ios: {

@@ -1,83 +1,81 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
-import { Button } from '@/components/ui';
-import { colors, radius, spacing } from '@/theme/theme';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Button, ErrorBanner, Muted, TextField } from '@/components/ui';
+import { radius, spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { useAuth } from '@/store/auth.store';
 
 export function LoginScreen() {
+  const styles = useStyles();
+  const { typography } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const login = useAuth((s) => s.login);
   const status = useAuth((s) => s.status);
   const error = useAuth((s) => s.error);
   const loading = status === 'authenticating';
+  const canSubmit = email.trim().length > 3 && password.length > 0;
 
   return (
     <SafeAreaView style={styles.screen}>
-      <StatusBar style="light" />
-      <View style={styles.inner}>
-        <Text style={styles.eyebrow}>RUTA RD Driver</Text>
-        <Text style={styles.title}>Tracking seguro para conductores</Text>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
+          <Animated.View entering={FadeInDown.springify().damping(16)} style={styles.brand}>
+            <Image source={require('../../assets/icon.png')} style={styles.logo} />
+            <Text style={styles.eyebrow}>RUTA RD Driver</Text>
+            <Text style={typography.display}>¡Hola de nuevo!</Text>
+            <Muted>Entra para ver tus órdenes y empezar a rodar.</Muted>
+          </Animated.View>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Correo"
-          placeholderTextColor={colors.textDim}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          value={email}
-          onChangeText={setEmail}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Contraseña"
-          placeholderTextColor={colors.textDim}
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
-
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-
-        <Button
-          label={loading ? 'Entrando...' : 'Entrar'}
-          loading={loading}
-          onPress={() => void login(email, password)}
-        />
-      </View>
+          <Animated.View entering={FadeInDown.delay(120).springify().damping(16)} style={styles.form}>
+            <TextField
+              label="Correo"
+              icon="mail-outline"
+              placeholder="tu@correo.com"
+              autoCapitalize="none"
+              autoComplete="email"
+              keyboardType="email-address"
+              value={email}
+              onChangeText={setEmail}
+              returnKeyType="next"
+            />
+            <TextField
+              label="Contraseña"
+              icon="lock-closed-outline"
+              placeholder="Tu contraseña"
+              secure
+              autoCapitalize="none"
+              autoComplete="password"
+              value={password}
+              onChangeText={setPassword}
+              returnKeyType="go"
+              onSubmitEditing={() => canSubmit && void login(email, password)}
+            />
+            {error ? <ErrorBanner message={error} /> : null}
+            <Button
+              label={loading ? 'Entrando…' : 'Entrar'}
+              icon="arrow-forward"
+              loading={loading}
+              disabled={!canSubmit}
+              onPress={() => void login(email, password)}
+            />
+            <Muted style={{ textAlign: 'center' }}>¿Olvidaste tu contraseña? Escríbele a operaciones.</Muted>
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  inner: { flex: 1, justifyContent: 'center', gap: spacing.md, padding: spacing.xl },
-  eyebrow: {
-    color: colors.primaryBright,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
-  title: {
-    color: colors.text,
-    fontSize: 36,
-    fontWeight: '900',
-    letterSpacing: -1.5,
-    lineHeight: 40,
-    marginBottom: spacing.lg,
-  },
-  input: {
-    minHeight: 50,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.md,
-    color: colors.text,
-    fontSize: 15,
-  },
-  error: { color: colors.dangerBright, fontSize: 13, fontWeight: '600' },
-});
+  inner: { flexGrow: 1, justifyContent: 'center', gap: spacing.xxl, padding: spacing.xl },
+  brand: { gap: spacing.sm },
+  logo: { width: 64, height: 64, borderRadius: radius.lg, marginBottom: spacing.sm },
+  eyebrow: { color: colors.primary, fontSize: 13, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
+  form: { gap: spacing.lg },
+}),
+);

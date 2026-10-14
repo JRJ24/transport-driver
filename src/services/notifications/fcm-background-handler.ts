@@ -1,7 +1,12 @@
 type MessagingModule = typeof import('@react-native-firebase/messaging');
 
 async function loadMessaging(): Promise<MessagingModule | null> {
-  return import('@react-native-firebase/messaging').catch(() => null);
+  // Expo's import() returns a thenable without .catch, so await it instead.
+  try {
+    return await import('@react-native-firebase/messaging');
+  } catch {
+    return null;
+  }
 }
 
 void loadMessaging().then((messagingModule) => {

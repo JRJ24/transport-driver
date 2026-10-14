@@ -1,452 +1,548 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import { useNavigation } from '@react-navigation/native';
-import { Button, Card, Muted } from '@/components/ui';
-import { deliveryProofsApi } from '@/api/delivery-proofs.api';
-import { orderEventsApi } from '@/api/order-events.api';
+import { Ionicons } from '@expo/vector-icons';
+import { useKeepAwake } from 'expo-keep-awake';
+import Animated, { FadeInDown, FadeInUp, LinearTransition } from 'react-native-reanimated';
+import { Badge, Button, EmptyState, IconButton, Muted } from '@/components/ui';
+import { SwipeButton } from '@/components/SwipeButton';
+import { ActionSheet } from '@/components/Sheet';
+import { StepIndicator } from '@/components/OrderCard';
+import { radius, spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { incidentsApi } from '@/api/incidents.api';
-import { evidenceStatus, missingEvidenceMessage } from '@/utils/evidence';
-import { toErrorMessage } from '@/api/client';
-import { colors, radius, spacing } from '@/theme/theme';
-import { useOrders } from '@/store/order.store';
+import { useTrip } from '@/store/trip.store';
 import { useTracking } from '@/store/tracking.store';
 import { useConnectivity } from '@/store/connectivity.store';
-import { decodePolyline } from '@/utils/polyline';
-import {
-  googleMapsNavigationUrl,
-  nextStopForDriver,
-  wazeNavigationUrl,
-} from '@/utils/navigation';
-import type { IncidentSeverity, IncidentType, LatLng, OrderStop } from '@/types/api';
-import type { TabParamList } from '@/navigation/types';
+import { toast } from '@/store/toast.store';
+import type { IncidentSeverity, IncidentType, LatLng } from '@/types/api';
+import { friendlyError } from '@/utils/errors';
+import { haptic } from '@/utils/feedback';
+import { formatMeters, formatMinutes, formatTime } from '@/utils/format';
+import { stopPoint } from '@/utils/geo';
+import { googleMapsNavigationUrl, wazeNavigationUrl } from '@/utils/navigation';
+import { dropoffStop, phaseCopy, pickupStop, sortedStops, stopAddress, targetStopFor } from '@/utils/orders';
+import { useLiveLocation } from './useLiveLocation';
+import { useTripNavigation } from './useTripNavigation';
+import { darkMapStyle, lightMapStyle } from './mapStyle';
+import { goToTab, openEvidence } from '@/navigation/ref';
 
-const DEFAULT_REGION = {
-  latitude: 18.4861,
-  longitude: -69.9312,
-  latitudeDelta: 0.08,
-  longitudeDelta: 0.08,
-};
+const DEFAULT_REGION = { latitude: 18.4861, longitude: -69.9312, latitudeDelta: 0.08, longitudeDelta: 0.08 };
 
-function toLatLng(s: OrderStop | undefined): LatLng | null {
-  if (!s || s.latitude === null || s.longitude === null) return null;
-  const latitude = Number(s.latitude);
-  const longitude = Number(s.longitude);
+const INCIDENTS: Array<{ key: IncidentType; label: string; description: string; severity: IncidentSeverity; icon: React.ComponentProps<typeof Ionicons>['name'] }> = [
+  { key: 'CUSTOMER_ABSENT', label: 'Cliente ausente', description: 'Nadie recibe en el punto.', severity: 'MEDIUM', icon: 'person-remove-outline' },
+  { key: 'DELAY', label: 'Tráfico o retraso', description: 'Llegaré más tarde de lo previsto.', severity: 'LOW', icon: 'time-outline' },
+  { key: 'WRONG_ADDRESS', label: 'Dirección incorrecta', description: 'No encuentro el lugar indicado.', severity: 'MEDIUM', icon: 'location-outline' },
+  { key: 'DAMAGE', label: 'Daño en la carga', description: 'La mercancía tiene un problema.', severity: 'HIGH', icon: 'cube-outline' },
+  { key: 'VEHICLE_PROBLEM', label: 'Problema con el vehículo', description: 'Avería, goma, combustible…', severity: 'HIGH', icon: 'car-sport-outline' },
+];
 
-  return Number.isFinite(latitude) && Number.isFinite(longitude)
-    ? { latitude, longitude }
-    : null;
+function KeepAwake() {
+  useKeepAwake();
+  return null;
+}
+
+/** Los marcadores con vista propia se pintan una vez y se congelan (Android). */
+function useSettled(deps: unknown[]): boolean {
+  const [tracks, setTracks] = useState(true);
+  useEffect(() => {
+    setTracks(true);
+    const t = setTimeout(() => setTracks(false), 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  return tracks;
 }
 
 export function RouteScreen() {
+  const styles = useStyles();
+  const { colors, elevation, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
+  const focused = useIsFocused();
   const mapRef = useRef<MapView>(null);
-  const navigation = useNavigation<TabNav>();
-  const { activeOrder, route, approach } = useOrders();
-  const updateStatus = useOrders((s) => s.updateStatus);
-  const clearActive = useOrders((s) => s.clearActive);
-  const refreshApproach = useOrders((s) => s.refreshApproach);
-  const { isTracking, lastFix, lastFixAt, pendingCount, stop, flush } = useTracking();
+
+  const order = useTrip((s) => s.order);
+  const markArrived = useTrip((s) => s.markArrived);
+  const confirmPickup = useTrip((s) => s.confirmPickup);
+  const isTracking = useTracking((s) => s.isTracking);
+  const lastFixAt = useTracking((s) => s.lastFixAt);
+  const pendingCount = useTracking((s) => s.pendingCount);
   const online = useConnectivity((s) => s.online);
-  const lastSyncAt = useConnectivity((s) => s.lastSyncAt);
-  const [busy, setBusy] = useState(false);
 
-  const stops = useMemo(
-    () =>
-      [...(activeOrder?.orderStops ?? [])].sort((a, b) => a.sequence - b.sequence),
-    [activeOrder],
-  );
-  const polyline = useMemo(
-    () => (route?.polyline ? decodePolyline(route.polyline) : []),
-    [route],
-  );
-  const stopPoints = useMemo(
-    () => stops.map(toLatLng).filter((point): point is LatLng => Boolean(point)),
-    [stops],
-  );
-  // Tramo desde donde esta el conductor hasta la parada que le toca. Antes su
-  // marcador quedaba suelto, sin nada que lo uniera a la ruta.
-  const approachLine = useMemo(
-    () => (approach?.route?.polyline ? decodePolyline(approach.route.polyline) : []),
-    [approach],
-  );
+  const fix = useLiveLocation(Boolean(order) && focused);
+  const nav = useTripNavigation(order, fix);
 
-  const fitToRoute = () => {
-    const points: LatLng[] = polyline.length ? [...polyline] : [...stopPoints];
-    points.push(...approachLine);
-    if (lastFix) {
-      points.push(lastFix);
+  const [follow, setFollow] = useState(true);
+  const [busy, setBusy] = useState<'arrive' | 'pickup' | 'incident' | null>(null);
+  const [sheet, setSheet] = useState<'nav' | 'incident' | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const nearNotified = useRef<string | null>(null);
+
+  const stops = useMemo(() => sortedStops(order), [order]);
+  const pickup = pickupStop(order);
+  const dropoff = dropoffStop(order);
+  const phase = nav?.phase;
+  const target = order && phase ? targetStopFor(order, phase) : undefined;
+  const tracksMarkers = useSettled([order?.id, phase]);
+
+  // Camara tipo Uber: sigue al vehiculo, orientada a su rumbo.
+  useEffect(() => {
+    if (!follow || !fix || !mapRef.current) return;
+    mapRef.current.animateCamera(
+      {
+        center: { latitude: fix.latitude, longitude: fix.longitude },
+        heading: fix.heading ?? 0,
+        pitch: 45,
+        zoom: 17,
+      },
+      { duration: 900 },
+    );
+  }, [fix, follow]);
+
+  // Aviso al acercarse a la parada (una vez por fase).
+  useEffect(() => {
+    if (!nav?.nearTarget || !phase || !order) return;
+    const key = `${order.id}:${phase}`;
+    if ((phase === 'TO_PICKUP' || phase === 'TO_DROPOFF') && nearNotified.current !== key) {
+      nearNotified.current = key;
+      toast.info(
+        phase === 'TO_PICKUP' ? 'Estás llegando a la recogida' : 'Estás llegando a la entrega',
+        'Cuando estés en el lugar, toca «Llegué».',
+      );
     }
+  }, [nav?.nearTarget, phase, order]);
+
+  const fitAll = () => {
+    const points: LatLng[] = [];
+    if (fix) points.push(fix);
+    if (nav?.target) points.push(nav.target);
+    if (points.length < 2) stops.forEach((s) => stopPoint(s) && points.push(stopPoint(s)!));
     if (points.length >= 2) {
+      setFollow(false);
       mapRef.current?.fitToCoordinates(points, {
-        edgePadding: { top: 80, right: 60, bottom: 220, left: 60 },
+        edgePadding: { top: 220, right: 60, bottom: 360, left: 60 },
         animated: true,
       });
     }
   };
 
-  useEffect(() => {
-    const t = setTimeout(fitToRoute, 500);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route, activeOrder, approach]);
-
-  /*
-   * El tramo caduca a medida que el conductor avanza, asi que se refresca
-   * mientras la pantalla esta abierta. 20 s no cuesta: el backend solo llama a
-   * Google cuando el conductor se alejo mas de 200 m del ultimo calculo.
-   */
-  useEffect(() => {
-    if (!activeOrder) {
-      return undefined;
-    }
-
-    const timer = setInterval(() => void refreshApproach(), 20_000);
-    return () => clearInterval(timer);
-  }, [activeOrder, refreshApproach]);
-
-  if (!activeOrder) {
+  if (!order || !nav || !phase) {
     return (
-      <SafeAreaView style={styles.screen} edges={['top']}>
-        <StatusBar style="light" />
-        <View style={styles.center}>
-          <Text style={styles.emptyTitle}>Sin ruta activa</Text>
-          <Muted>Selecciona una orden en Inicio para ver su ruta.</Muted>
-        </View>
-      </SafeAreaView>
+      <View style={[styles.screen, { paddingTop: insets.top }]}>
+        <EmptyState
+          icon="navigate-circle-outline"
+          title="Sin servicio en curso"
+          message="Cuando inicies una orden, aquí verás tu ruta en vivo: primero hacia la recogida y luego hacia la entrega."
+          action={
+            <Button
+              label="Ver mis órdenes"
+              icon="list-outline"
+              variant="secondary"
+              size="md"
+              onPress={() => goToTab('Inicio')}
+            />
+          }
+        />
+      </View>
     );
   }
 
-  const pickup = stops.find((s) => s.stopType === 'PICKUP') ?? stops[0];
-  const dropoff = stops.find((s) => s.stopType === 'DROPOFF') ?? stops[stops.length - 1];
-  const initialPoint = toLatLng(pickup) ?? stopPoints[0] ?? lastFix;
-  const initialRegion = {
-    ...(initialPoint ?? DEFAULT_REGION),
-    latitudeDelta: 0.08,
-    longitudeDelta: 0.08,
-  };
+  const toPickup = phase === 'TO_PICKUP' || phase === 'AT_PICKUP';
+  const stepIndex = toPickup ? 0 : phase === 'TO_DROPOFF' ? 1 : 2;
+  const legColor = toPickup ? colors.pickup : colors.primary;
 
-  const nextStop = nextStopForDriver(activeOrder);
+  async function onArrived() {
+    setBusy('arrive');
+    try {
+      await markArrived(fix);
+      haptic.success();
+      toast.success(
+        toPickup ? 'Llegada a la recogida registrada' : 'Llegada a la entrega registrada',
+        toPickup ? 'Recoge la carga y confirma deslizando.' : 'Ahora registra la evidencia de entrega.',
+      );
+      if (!toPickup && order) {
+        openEvidence(order.id);
+      }
+    } catch (e) {
+      toast.error('No se pudo registrar la llegada', friendlyError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
 
-  /**
-   * «Como llegar»: apunta a la siguiente parada del viaje, no al destino final.
-   * Al empezar hay que ir a recoger, no a entregar.
-   */
-  const openExternalNav = () => {
-    const dest = toLatLng(nextStop ?? undefined) ?? lastFix;
-    if (!dest) {
-      Alert.alert('Sin coordenadas', 'Esa parada no tiene ubicacion registrada.');
+  async function onPickedUp() {
+    setBusy('pickup');
+    try {
+      await confirmPickup(fix);
+      setFollow(true);
+      toast.success('¡Carga recogida!', 'Te llevamos ahora hacia la entrega.');
+    } catch (e) {
+      toast.error('No se pudo confirmar la recogida', friendlyError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function report(key: string) {
+    const incident = INCIDENTS.find((i) => i.key === key);
+    const where = fix ?? stopPoint(target);
+    if (!incident || !order) return;
+    if (!where) {
+      toast.warning('Ubicación requerida', 'No tenemos tu ubicación para reportar.');
       return;
     }
-
-    const target = nextStop?.stopType === 'PICKUP' ? 'la recogida' : 'la entrega';
-
-    Alert.alert('Como llegar', `Navegar hasta ${target}.`, [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Google Maps', onPress: () => void Linking.openURL(googleMapsNavigationUrl(dest)) },
-      { text: 'Waze', onPress: () => void Linking.openURL(wazeNavigationUrl(dest)) },
-    ]);
-  };
-
-  const reportIncident = (
-    incidentType: IncidentType,
-    severity: IncidentSeverity,
-    title: string,
-    description: string,
-  ) => {
-    const location = currentOrFallback(lastFix, dropoff ?? pickup);
-    if (!location) {
-      Alert.alert('Ubicación requerida', 'No hay ubicación disponible para reportar.');
-      return;
-    }
-
-    setBusy(true);
+    setBusy('incident');
     incidentsApi
       .create({
-        orderId: activeOrder.id,
-        incidentType,
-        severity,
-        title,
-        description,
-        latitude: location.latitude,
-        longitude: location.longitude,
+        orderId: order.id,
+        incidentType: incident.key,
+        severity: incident.severity,
+        title: incident.label,
+        description: incident.description,
+        latitude: where.latitude,
+        longitude: where.longitude,
       })
-      .then(() => Alert.alert('Incidencia enviada', 'La torre de control fue notificada.'))
-      .catch((error) => Alert.alert('No se pudo reportar', toErrorMessage(error)))
-      .finally(() => setBusy(false));
-  };
+      .then(() => toast.success('Incidencia enviada', 'Operaciones ya fue notificada.'))
+      .catch((e) => toast.error('No se pudo reportar', friendlyError(e)))
+      .finally(() => setBusy(null));
+  }
 
-  const openIncidentMenu = () => {
-    Alert.alert('Reportar incidencia', 'Selecciona el tipo de novedad.', [
-      {
-        text: 'Cliente ausente',
-        onPress: () =>
-          reportIncident(
-            'CUSTOMER_ABSENT',
-            'MEDIUM',
-            'Cliente ausente',
-            'El receptor no se encuentra disponible en el punto de entrega.',
-          ),
-      },
-      {
-        text: 'Tráfico / retraso',
-        onPress: () =>
-          reportIncident(
-            'DELAY',
-            'LOW',
-            'Retraso en ruta',
-            'El conductor reporta retraso por tráfico o condiciones de vía.',
-          ),
-      },
-      {
-        text: 'Daño',
-        onPress: () =>
-          reportIncident(
-            'DAMAGE',
-            'HIGH',
-            'Daño reportado',
-            'El conductor reporta posible daño o novedad con la carga.',
-          ),
-      },
-    ]);
-  };
-
-  const onComplete = async () => {
-    setBusy(true);
-    try {
-      const evidence = evidenceStatus(await deliveryProofsApi.bundle(activeOrder.id));
-      if (!evidence.ready) {
-        Alert.alert('Evidencia incompleta', missingEvidenceMessage(evidence), [
-          { text: 'Luego', style: 'cancel' },
-          { text: 'Capturar', onPress: () => navigation.navigate('Evid') },
-        ]);
-        return;
-      }
-      // Antes de DELIVERED: despues la asignacion queda COMPLETED y el servidor
-      // responde 403 a los puntos que seguian en la cola. Si DELIVERED falla,
-      // el GPS sigue activo.
-      await flush();
-      await updateStatus(activeOrder.id, 'DELIVERED');
-      await stop();
-      await clearActive();
-      Alert.alert('Servicio completado', 'La entrega fue registrada.');
-    } catch (error) {
-      Alert.alert('No se pudo completar', toErrorMessage(error));
-    } finally {
-      setBusy(false);
+  function openExternal(app: string) {
+    const dest = stopPoint(target);
+    if (!dest) {
+      toast.warning('Sin coordenadas', 'Esa parada no tiene ubicación registrada.');
+      return;
     }
-  };
+    void Linking.openURL(app === 'waze' ? wazeNavigationUrl(dest) : googleMapsNavigationUrl(dest));
+  }
 
-  /**
-   * D3: «Llegué» solo vaciaba la cola de GPS y no registraba nada.
-   * Ahora deja constancia en la bitacora de la orden, ademas de sincronizar.
-   */
-  const onArrived = async () => {
-    setBusy(true);
-    try {
-      const where = currentOrFallback(lastFix, dropoff ?? pickup);
-      await orderEventsApi.create({
-        orderId: activeOrder.id,
-        eventType: 'ARRIVED',
-        description: 'El conductor llego al punto de entrega.',
-        latitude: where?.latitude,
-        longitude: where?.longitude,
-      });
-      await flush();
-      Alert.alert('Llegada registrada', 'La torre de control fue notificada.');
-    } catch (error) {
-      Alert.alert('No se pudo registrar la llegada', toErrorMessage(error));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const initial = stopPoint(target) ?? fix ?? DEFAULT_REGION;
+  const gpsStale = !lastFixAt || Date.now() - new Date(lastFixAt).getTime() > 60_000;
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
-      <StatusBar style="light" />
-      <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.title}>Ruta activa</Text>
-          <Muted>{`Próxima parada · ${dropoff?.city ?? '—'}`}</Muted>
-        </View>
-        <View style={[styles.conn, { backgroundColor: online ? `${colors.success}22` : `${colors.danger}22` }]}>
-          <View style={[styles.dot, { backgroundColor: online ? colors.success : colors.danger }]} />
-          <Text style={[styles.connText, { color: online ? colors.success : colors.danger }]}>
-            {online ? 'En línea' : 'Sin conexión'}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.mapWrap}>
-        <MapView
-          ref={mapRef}
-          provider={PROVIDER_GOOGLE}
-          style={StyleSheet.absoluteFill}
-          initialRegion={initialRegion}
-          showsUserLocation={false}
-        >
-          {approachLine.length > 1 && (
+    <View style={styles.screen}>
+      <KeepAwake />
+      <MapView
+        ref={mapRef}
+        provider={PROVIDER_GOOGLE}
+        style={StyleSheet.absoluteFill}
+        customMapStyle={isDark ? darkMapStyle : lightMapStyle}
+        initialRegion={{ ...initial, latitudeDelta: 0.04, longitudeDelta: 0.04 }}
+        showsUserLocation={false}
+        showsMyLocationButton={false}
+        showsCompass={false}
+        toolbarEnabled={false}
+        showsTraffic={false}
+        onPanDrag={() => follow && setFollow(false)}
+        mapPadding={{ top: insets.top + 130, right: 0, bottom: expanded ? 360 : 260, left: 0 }}
+      >
+        {nav.path.length > 1 ? (
+          <>
+            <Polyline coordinates={nav.path} strokeColor={colors.white} strokeWidth={10} zIndex={1} />
             <Polyline
-              coordinates={approachLine}
-              strokeColor={colors.textMuted}
-              strokeWidth={4}
-              lineDashPattern={[10, 8]}
+              coordinates={nav.path}
+              strokeColor={legColor}
+              strokeWidth={6}
+              zIndex={2}
+              lineDashPattern={nav.routed ? undefined : [12, 10]}
             />
-          )}
-          {polyline.length > 1 && (
-            <Polyline coordinates={polyline} strokeColor={colors.primaryBright} strokeWidth={5} />
-          )}
-          {stops.map((s) => {
-            const coordinate = toLatLng(s);
-            if (!coordinate) return null;
+          </>
+        ) : null}
 
-            return (
-              <Marker key={s.id} coordinate={coordinate} title={s.addressLine}>
-                <View
-                  style={[
-                    styles.marker,
-                    {
-                      backgroundColor:
-                        s.stopType === 'PICKUP'
-                          ? colors.pickup
-                          : s.stopType === 'DROPOFF'
-                            ? colors.delivery
-                            : colors.textMuted,
-                    },
-                  ]}
-                />
-              </Marker>
-            );
-          })}
-          {lastFix && (
-            <Marker coordinate={lastFix} title="Mi ubicación" anchor={{ x: 0.5, y: 0.5 }}>
+        {pickup && stopPoint(pickup) ? (
+          <Marker coordinate={stopPoint(pickup)!} anchor={{ x: 0.5, y: 1 }} tracksViewChanges={tracksMarkers} zIndex={3}>
+            <Pin color={colors.pickup} icon="cube" done={Boolean(pickup.completedAt || !toPickup)} />
+          </Marker>
+        ) : null}
+        {dropoff && dropoff.id !== pickup?.id && stopPoint(dropoff) ? (
+          <Marker coordinate={stopPoint(dropoff)!} anchor={{ x: 0.5, y: 1 }} tracksViewChanges={tracksMarkers} zIndex={3}>
+            <Pin color={colors.delivery} icon="flag" />
+          </Marker>
+        ) : null}
+        {fix ? (
+          <Marker
+            coordinate={fix}
+            anchor={{ x: 0.5, y: 0.5 }}
+            flat
+            rotation={fix.heading ?? 0}
+            tracksViewChanges={tracksMarkers}
+            zIndex={5}
+          >
+            <View style={styles.vehicleHalo}>
               <View style={styles.vehicle}>
-                <View style={styles.vehicleInner} />
+                <Ionicons name="navigate" size={18} color={colors.white} style={{ transform: [{ rotate: '-45deg' }] }} />
               </View>
-            </Marker>
-          )}
-        </MapView>
+            </View>
+          </Marker>
+        ) : null}
+      </MapView>
 
-        <Pressable style={[styles.fab, styles.fabCenter]} onPress={fitToRoute}>
-          <Text style={styles.fabIcon}>◎</Text>
-        </Pressable>
-        <Pressable style={[styles.fab, styles.fabNav]} onPress={openExternalNav}>
-          <Text style={styles.fabIcon}>➤</Text>
-        </Pressable>
+      {/* Instruccion arriba: a donde, cuanto falta. */}
+      <Animated.View
+        entering={FadeInDown.springify().damping(16)}
+        style={[styles.topCard, elevation.floating, { top: insets.top + spacing.sm }]}
+      >
+        <View style={[styles.topIcon, { backgroundColor: toPickup ? colors.warningSoft : colors.primarySoft }]}>
+          <Ionicons name={toPickup ? 'cube-outline' : 'flag-outline'} size={22} color={toPickup ? colors.pickup : colors.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.topTitle} numberOfLines={1}>
+            {phaseCopy[phase].title}
+          </Text>
+          <Text style={styles.topSub} numberOfLines={1}>
+            {stopAddress(target)}
+          </Text>
+        </View>
+        <View style={styles.eta}>
+          <Text style={styles.etaValue}>{formatMinutes(nav.etaMinutes)}</Text>
+          <Text style={styles.etaSub}>{formatMeters(nav.remainingMeters)}</Text>
+        </View>
+      </Animated.View>
+
+      {!online || !isTracking || gpsStale ? (
+        <Animated.View entering={FadeInDown} style={[styles.statusPill, { top: insets.top + 96 }]}>
+          <Badge
+            tone={!online ? 'danger' : 'warning'}
+            icon={!online ? 'cloud-offline-outline' : 'locate-outline'}
+            label={
+              !online
+                ? `Sin conexión${pendingCount ? ` · ${pendingCount} por enviar` : ''}`
+                : !isTracking
+                  ? 'GPS en pausa'
+                  : 'Buscando señal GPS…'
+            }
+          />
+        </Animated.View>
+      ) : null}
+
+      {/* Botones flotantes del mapa. */}
+      <View style={[styles.fabs, { bottom: (expanded ? 370 : 270) + insets.bottom }]}>
+        {!follow ? (
+          <Animated.View entering={FadeInUp}>
+            <Pressable
+              onPress={() => {
+                haptic.tap();
+                setFollow(true);
+              }}
+              style={[styles.recenter, elevation.raised]}
+              accessibilityLabel="Volver a seguirme"
+            >
+              <Ionicons name="locate" size={18} color={colors.white} />
+              <Text style={styles.recenterText}>Recentrar</Text>
+            </Pressable>
+          </Animated.View>
+        ) : null}
+        <IconButton icon="scan-outline" accessibilityLabel="Ver ruta completa" onPress={fitAll} />
+        <IconButton icon="arrow-redo-outline" tone="primary" accessibilityLabel="Abrir en Google Maps o Waze" onPress={() => setSheet('nav')} />
       </View>
 
-      <Card style={styles.summary}>
-        <View style={styles.summaryRow}>
-          <Text style={styles.bigMetric}>
-            {route?.durationMin ?? activeOrder.estimatedDurationMin} min
-          </Text>
-          <Muted>
-            {`${route ? route.distanceKm : Number(activeOrder.distanceKm)} km`}
-            {isTracking ? ' · GPS activo' : ' · GPS en pausa'}
-            {pendingCount > 0 ? ` · ${pendingCount} por sincronizar` : ''}
-          </Muted>
-        </View>
-        {approach?.route ? (
-          <Muted>
-            {`${approach.route.durationMin} min · ${approach.route.distanceKm} km hasta ${
-              approach.targetStopType === 'PICKUP' ? 'la recogida' : 'la entrega'
-            }`}
-          </Muted>
-        ) : null}
-        <Muted>
-          {lastFixAt
-            ? `Última ubicación: ${new Date(lastFixAt).toLocaleTimeString()}`
-            : 'Esperando señal GPS...'}
-          {lastSyncAt ? ` · Sync: ${new Date(lastSyncAt).toLocaleTimeString()}` : ''}
-        </Muted>
+      {/* Panel inferior: un solo paso claro a la vez. */}
+      <Animated.View
+        layout={LinearTransition.springify().damping(18)}
+        style={[styles.panel, elevation.floating, { paddingBottom: spacing.lg }]}
+      >
+        <Pressable onPress={() => setExpanded((e) => !e)} hitSlop={10} style={styles.grabberZone} accessibilityLabel="Más detalles">
+          <View style={styles.grabber} />
+        </Pressable>
 
-        <View style={styles.actions}>
+        <View style={styles.panelHead}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.orderCode}>{order.orderCode}</Text>
+            <Muted>
+              {target?.contactName ? `${target.contactName} · ` : ''}
+              {toPickup ? 'Recogida' : 'Entrega'}
+            </Muted>
+          </View>
+          {target?.contactPhone ? (
+            <IconButton
+              icon="call"
+              tone="success"
+              accessibilityLabel="Llamar al contacto"
+              onPress={() => void Linking.openURL(`tel:${target.contactPhone}`)}
+            />
+          ) : null}
+          <IconButton icon="warning-outline" tone="danger" accessibilityLabel="Reportar incidencia" onPress={() => setSheet('incident')} />
+        </View>
+
+        {expanded ? (
+          <Animated.View entering={FadeInDown} style={{ gap: spacing.md }}>
+            <StepIndicator steps={['Recogida', 'Entrega', 'Evidencia']} current={stepIndex} />
+            {target?.instructions ? (
+              <View style={styles.instructions}>
+                <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.textMuted} />
+                <Text style={styles.instructionsText}>{target.instructions}</Text>
+              </View>
+            ) : null}
+            <Muted>
+              {isTracking ? 'Compartiendo ubicación' : 'Ubicación en pausa'}
+              {lastFixAt ? ` · última señal ${formatTime(lastFixAt)}` : ''}
+            </Muted>
+          </Animated.View>
+        ) : null}
+
+        {phase === 'TO_PICKUP' || phase === 'TO_DROPOFF' ? (
           <Button
-            label="Llegué"
-            tone="primary"
-            style={styles.flex}
+            label={phase === 'TO_PICKUP' ? 'Llegué a la recogida' : 'Llegué a la entrega'}
+            icon="location"
+            variant={nav.nearTarget ? 'primary' : 'secondary'}
+            loading={busy === 'arrive'}
             onPress={() => void onArrived()}
           />
-          <Button
-            label="Reportar"
-            tone="danger"
-            style={styles.flex}
-            onPress={openIncidentMenu}
+        ) : null}
+        {phase === 'AT_PICKUP' ? (
+          <SwipeButton
+            label="Desliza: carga recogida"
+            tone="warning"
+            icon="cube"
+            loading={busy === 'pickup'}
+            onConfirm={() => void onPickedUp()}
           />
-        </View>
-        <Button label="Completar entrega" tone="success" loading={busy} onPress={onComplete} />
-      </Card>
-    </SafeAreaView>
+        ) : null}
+        {phase === 'AT_DROPOFF' ? (
+          <Button
+            label="Registrar evidencia y completar"
+            icon="camera"
+            variant="success"
+            onPress={() => openEvidence(order.id)}
+          />
+        ) : null}
+      </Animated.View>
+
+      <ActionSheet
+        visible={sheet === 'nav'}
+        onClose={() => setSheet(null)}
+        title="Abrir navegación por voz"
+        subtitle={`Hacia ${toPickup ? 'la recogida' : 'la entrega'}: ${stopAddress(target)}`}
+        options={[
+          { key: 'google', label: 'Google Maps', icon: 'map-outline' },
+          { key: 'waze', label: 'Waze', icon: 'car-outline' },
+        ]}
+        onSelect={openExternal}
+      />
+      <ActionSheet
+        visible={sheet === 'incident'}
+        onClose={() => setSheet(null)}
+        title="Reportar incidencia"
+        subtitle="Operaciones recibe el aviso al instante con tu ubicación."
+        options={INCIDENTS.map((i) => ({
+          key: i.key,
+          label: i.label,
+          description: i.description,
+          icon: i.icon,
+          tone: i.severity === 'HIGH' ? 'danger' : 'warning',
+        }))}
+        onSelect={report}
+      />
+    </View>
   );
 }
 
-type TabNav = { navigate: (screen: keyof TabParamList) => void };
-
-function currentOrFallback(
-  lastFix: LatLng | null,
-  stop: OrderStop | undefined,
-): LatLng | null {
-  if (lastFix) return lastFix;
-  if (!stop || stop.latitude === null || stop.longitude === null) return null;
-  const latitude = Number(stop?.latitude);
-  const longitude = Number(stop?.longitude);
-
-  return Number.isFinite(latitude) && Number.isFinite(longitude)
-    ? { latitude, longitude }
-    : null;
+function Pin({ color, icon, done }: { color: string; icon: React.ComponentProps<typeof Ionicons>['name']; done?: boolean }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <View style={[styles.pin, { backgroundColor: done ? colors.textDim : color }]}>
+        <Ionicons name={done ? 'checkmark' : icon} size={16} color={colors.white} />
+      </View>
+      <View style={[styles.pinTip, { borderTopColor: done ? colors.textDim : color }]} />
+    </View>
+  );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, padding: spacing.xl },
-  emptyTitle: { color: colors.text, fontSize: 20, fontWeight: '800' },
-  headerRow: {
+  topCard: {
+    position: 'absolute',
+    left: spacing.lg,
+    right: spacing.lg,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surface,
   },
-  title: { color: colors.text, fontSize: 24, fontWeight: '900' },
-  conn: {
+  topIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  topTitle: { fontSize: 17, fontWeight: '700', color: colors.text },
+  topSub: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
+  eta: { alignItems: 'flex-end' },
+  etaValue: { fontSize: 20, fontWeight: '700', color: colors.success },
+  etaSub: { fontSize: 12, color: colors.textMuted },
+  statusPill: { position: 'absolute', alignSelf: 'center' },
+  fabs: { position: 'absolute', right: spacing.lg, alignItems: 'flex-end', gap: spacing.sm },
+  recenter: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
+    paddingHorizontal: 14,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primary,
   },
-  dot: { width: 7, height: 7, borderRadius: 4 },
-  connText: { fontSize: 12, fontWeight: '800' },
-  mapWrap: { flex: 1, margin: spacing.lg, borderRadius: radius.lg, overflow: 'hidden', borderWidth: 1, borderColor: colors.border },
-  marker: { width: 18, height: 18, borderRadius: 9, borderWidth: 3, borderColor: '#fff' },
-  vehicle: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: `${colors.primaryBright}55`,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  vehicleInner: { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.primaryBright, borderWidth: 2, borderColor: '#fff' },
-  fab: {
+  recenterText: { color: colors.white, fontWeight: '700', fontSize: 14 },
+  panel: {
     position: 'absolute',
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.md,
+  },
+  grabberZone: { alignItems: 'center', paddingTop: spacing.sm },
+  grabber: { width: 40, height: 5, borderRadius: 3, backgroundColor: colors.borderStrong },
+  panelHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  orderCode: { fontSize: 18, fontWeight: '700', color: colors.text },
+  instructions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+  },
+  instructionsText: { flex: 1, fontSize: 14, color: colors.textMuted },
+  vehicleHalo: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(37, 99, 235, 0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  fabCenter: { right: 12, bottom: 70 },
-  fabNav: { right: 12, bottom: 12 },
-  fabIcon: { color: colors.text, fontSize: 18 },
-  summary: { margin: spacing.lg, marginTop: 0, gap: spacing.sm },
-  summaryRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
-  bigMetric: { color: colors.text, fontSize: 26, fontWeight: '900' },
-  actions: { flexDirection: 'row', gap: spacing.sm },
-  flex: { flex: 1 },
-});
+  vehicle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    borderWidth: 3,
+    borderColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pin: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 3,
+    borderColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinTip: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderTopWidth: 8,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    marginTop: -2,
+  },
+}),
+);

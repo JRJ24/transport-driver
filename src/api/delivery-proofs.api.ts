@@ -59,8 +59,14 @@ export const deliveryProofsApi = {
   /** Pruebas con sus adjuntos, que es lo que valida el backend al entregar. */
   async bundle(orderId: string): Promise<EvidenceBundleItem[]> {
     const proofs = await deliveryProofsApi.list(orderId);
+    // La lista ya trae los adjuntos de cada prueba; solo una API anterior
+    // obliga a pedirlos uno por uno.
     const attachments = await Promise.all(
-      proofs.map((proof) => attachmentsApi.list('DeliveryProof', proof.id)),
+      proofs.map((proof) =>
+        proof.attachments
+          ? Promise.resolve(proof.attachments)
+          : attachmentsApi.list('DeliveryProof', proof.id),
+      ),
     );
 
     return proofs.map((proof, index) => ({
