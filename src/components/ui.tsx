@@ -14,24 +14,27 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, elevation, radius, spacing, typography } from '@/theme/theme';
+import { radius, spacing, type Palette, type Typography } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { haptic } from '@/utils/feedback';
 import { initials as toInitials } from '@/utils/format';
 
 export type IconName = ComponentProps<typeof Ionicons>['name'];
 export type Tone = 'primary' | 'success' | 'warning' | 'danger' | 'info' | 'neutral';
 
-export const toneColors: Record<Tone, { bg: string; fg: string; solid: string }> = {
+export function toneColors(colors: Palette): Record<Tone, { bg: string; fg: string; solid: string }> {
+  return {
   primary: { bg: colors.primarySoft, fg: colors.primaryText, solid: colors.primary },
   success: { bg: colors.successSoft, fg: colors.successText, solid: colors.success },
   warning: { bg: colors.warningSoft, fg: colors.warningText, solid: colors.warning },
   danger: { bg: colors.dangerSoft, fg: colors.dangerText, solid: colors.danger },
   info: { bg: colors.infoSoft, fg: colors.infoText, solid: colors.info },
   neutral: { bg: colors.neutralSoft, fg: colors.neutralText, solid: colors.textDim },
-};
+  };
+}
 
 // ── Texto ────────────────────────────────────────────────────────────────────
-type Variant = keyof typeof typography;
+type Variant = keyof Typography;
 
 export function AppText({
   variant = 'body',
@@ -44,6 +47,7 @@ export function AppText({
   children: ReactNode;
   numberOfLines?: number;
 }) {
+  const { typography } = useTheme();
   return (
     <Text style={[typography[variant] as TextStyle, style]} numberOfLines={numberOfLines}>
       {children}
@@ -71,6 +75,7 @@ export function Card({
   onPress?: () => void;
   accessibilityLabel?: string;
 }) {
+  const styles = useStyles();
   if (!onPress) {
     return <View style={[styles.card, style]}>{children}</View>;
   }
@@ -90,10 +95,12 @@ export function Card({
 }
 
 export function Divider({ style }: { style?: StyleProp<ViewStyle> }) {
+  const styles = useStyles();
   return <View style={[styles.divider, style]} />;
 }
 
 export function SectionHeader({ title, action }: { title: string; action?: ReactNode }) {
+  const styles = useStyles();
   return (
     <View style={styles.sectionHeader}>
       <Overline>{title}</Overline>
@@ -105,13 +112,15 @@ export function SectionHeader({ title, action }: { title: string; action?: React
 // ── Botones ──────────────────────────────────────────────────────────────────
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'success';
 
-const buttonColors: Record<ButtonVariant, { bg: string; fg: string; border: string }> = {
+function buttonColors(colors: Palette): Record<ButtonVariant, { bg: string; fg: string; border: string }> {
+  return {
   primary: { bg: colors.primary, fg: colors.onPrimary, border: colors.primary },
   success: { bg: colors.success, fg: colors.white, border: colors.success },
   danger: { bg: colors.danger, fg: colors.white, border: colors.danger },
   secondary: { bg: colors.surface, fg: colors.text, border: colors.borderStrong },
   ghost: { bg: 'transparent', fg: colors.primaryText, border: 'transparent' },
-};
+  };
+}
 
 export function Button({
   label,
@@ -132,7 +141,9 @@ export function Button({
   size?: 'md' | 'lg';
   style?: StyleProp<ViewStyle>;
 }) {
-  const c = buttonColors[variant];
+  const styles = useStyles();
+  const { colors, elevation } = useTheme();
+  const c = buttonColors(colors)[variant];
   const inactive = disabled || loading;
   return (
     <Pressable
@@ -183,6 +194,8 @@ export function IconButton({
   size?: number;
   style?: StyleProp<ViewStyle>;
 }) {
+  const styles = useStyles();
+  const { colors, elevation } = useTheme();
   const fg =
     tone === 'primary' ? colors.primary : tone === 'danger' ? colors.danger : tone === 'success' ? colors.success : colors.text;
   return (
@@ -223,7 +236,9 @@ export function Badge({
   icon?: IconName;
   pulse?: boolean;
 }) {
-  const c = toneColors[tone];
+  const styles = useStyles();
+  const { colors } = useTheme();
+  const c = toneColors(colors)[tone];
   return (
     <View style={[styles.badge, { backgroundColor: c.bg }]}>
       {icon ? <Ionicons name={icon} size={13} color={c.fg} /> : <PulseDot color={c.solid} active={pulse} />}
@@ -285,6 +300,8 @@ export function TextField({
   secure?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
   const [hidden, setHidden] = useState(true);
   return (
@@ -346,6 +363,8 @@ export function Avatar({
   onPress?: () => void;
   editable?: boolean;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   const content = (
     <View style={{ width: size, height: size }}>
       {uri ? (
@@ -386,6 +405,8 @@ export function ListRow({
   right?: ReactNode;
   tone?: 'neutral' | 'danger';
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   const fg = tone === 'danger' ? colors.danger : colors.text;
   const body = (
     <>
@@ -423,6 +444,7 @@ export function ListRow({
 }
 
 export function KeyValue({ label, value }: { label: string; value: string }) {
+  const styles = useStyles();
   return (
     <View style={styles.kv}>
       <Text style={styles.kvLabel}>{label}</Text>
@@ -434,6 +456,8 @@ export function KeyValue({ label, value }: { label: string; value: string }) {
 }
 
 export function Stat({ value, label, icon }: { value: string; label: string; icon?: IconName }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <View style={styles.stat}>
       {icon ? <Ionicons name={icon} size={18} color={colors.primary} /> : null}
@@ -459,6 +483,8 @@ export function EmptyState({
   message?: string;
   action?: ReactNode;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <View style={styles.empty}>
       <View style={styles.emptyIcon}>
@@ -474,6 +500,7 @@ export function EmptyState({
 }
 
 export function Skeleton({ height = 16, width = '100%', style }: { height?: number; width?: number | `${number}%`; style?: StyleProp<ViewStyle> }) {
+  const { colors } = useTheme();
   const opacity = useRef(new Animated.Value(0.5)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -493,6 +520,8 @@ export function Skeleton({ height = 16, width = '100%', style }: { height?: numb
 }
 
 export function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <View style={styles.errorBanner}>
       <Ionicons name="cloud-offline-outline" size={18} color={colors.dangerText} />
@@ -506,7 +535,8 @@ export function ErrorBanner({ message, onRetry }: { message: string; onRetry?: (
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
@@ -654,4 +684,5 @@ const styles = StyleSheet.create({
   },
   errorText: { flex: 1, color: colors.dangerText, fontSize: 13, fontWeight: '500' },
   errorRetry: { color: colors.dangerText, fontWeight: '700', fontSize: 13 },
-});
+}),
+);

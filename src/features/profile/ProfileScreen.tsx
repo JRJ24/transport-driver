@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@/navigation/types';
@@ -9,7 +8,9 @@ import { goToNotifications } from '@/navigation/ref';
 import { Avatar, Badge, Card, Divider, KeyValue, ListRow, Muted, Overline, Stat } from '@/components/ui';
 import { ActiveTripBanner } from '@/components/OrderCard';
 import { ConfirmSheet } from '@/components/Sheet';
-import { colors, spacing, typography } from '@/theme/theme';
+import { spacing } from '@/theme/theme';
+import { makeStyles, themeModeLabels, useTheme, useThemeMode, type ThemeMode } from '@/theme/ThemeProvider';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { useAuth } from '@/store/auth.store';
 import { useOrders } from '@/store/order.store';
 import { useTrip } from '@/store/trip.store';
@@ -32,6 +33,10 @@ const VERIFICATION: Record<string, { label: string; tone: 'success' | 'warning' 
 };
 
 export function ProfileScreen() {
+  const styles = useStyles();
+  const { colors, typography, isDark } = useTheme();
+  const themeMode = useThemeMode((s) => s.mode);
+  const setThemeMode = useThemeMode((s) => s.setMode);
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const user = useAuth((s) => s.user);
   const driver = useAuth((s) => s.driver);
@@ -81,7 +86,6 @@ export function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
-      <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.identity}>
           <Avatar name={user?.fullName} uri={user?.avatarUrl} size={84} editable onPress={avatarBusy ? undefined : pickAvatar} />
@@ -129,6 +133,25 @@ export function ProfileScreen() {
             trackColor={{ true: colors.success, false: colors.borderStrong }}
             thumbColor={colors.white}
           />
+        </Card>
+
+        <Overline>Apariencia</Overline>
+        <Card>
+          <SegmentedControl<ThemeMode>
+            value={themeMode}
+            onChange={setThemeMode}
+            segments={(['system', 'light', 'dark'] as ThemeMode[]).map((key) => ({
+              key,
+              label: themeModeLabels[key],
+            }))}
+          />
+          <Muted>
+            {themeMode === 'system'
+              ? `Sigue el tema del teléfono (ahora ${isDark ? 'oscuro' : 'claro'}).`
+              : themeMode === 'dark'
+                ? 'Más cómodo de noche y ahorra batería en pantallas OLED.'
+                : 'Se lee mejor a pleno sol.'}
+          </Muted>
         </Card>
 
         <Overline>Cuenta</Overline>
@@ -192,7 +215,8 @@ export function ProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxxl },
   identity: { alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md },
@@ -200,4 +224,5 @@ const styles = StyleSheet.create({
   stats: { flexDirection: 'row', gap: spacing.sm },
   availability: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   group: { padding: 0, gap: 0, overflow: 'hidden' },
-});
+}),
+);

@@ -3,7 +3,8 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'rea
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { EmptyState } from '@/components/ui';
-import { colors, elevation, radius, spacing } from '@/theme/theme';
+import { radius, spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { useNotifications } from '@/store/notifications.store';
 import { navigateToRoute } from '@/navigation/ref';
 import { parseNotificationRoute } from '@/services/notifications/notification-routing.service';
@@ -11,6 +12,8 @@ import { formatRelativeDay } from '@/utils/format';
 import { haptic } from '@/utils/feedback';
 
 export function NotificationsScreen() {
+  const styles = useStyles();
+  const { colors, elevation } = useTheme();
   const { items, load, markRead } = useNotifications();
   const [refreshing, setRefreshing] = useState(false);
 
@@ -69,7 +72,8 @@ export function NotificationsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, flexGrow: 1 },
   item: {
@@ -92,4 +96,5 @@ const styles = StyleSheet.create({
   message: { color: colors.textMuted, fontSize: 14, lineHeight: 19 },
   time: { color: colors.textDim, fontSize: 12, marginTop: 2 },
   dot: { width: 9, height: 9, borderRadius: 5, backgroundColor: colors.primary, marginTop: 6 },
-});
+}),
+);

@@ -1,7 +1,8 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, elevation, radius, spacing } from '@/theme/theme';
+import { radius, spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import type { Assignment } from '@/types/api';
 import { useTrip, useTripPhase } from '@/store/trip.store';
 import { bucketOf, phaseCopy, sortedStops } from '@/utils/orders';
@@ -20,6 +21,7 @@ export function assignmentBadge(a: Assignment): { label: string; tone: Tone; pul
 }
 
 export function OrderCard({ assignment, onPress }: { assignment: Assignment; onPress: () => void }) {
+  const styles = useStyles();
   const order = assignment.order;
   const badge = assignmentBadge(assignment);
   const stops = sortedStops(order);
@@ -49,6 +51,8 @@ export function OrderCard({ assignment, onPress }: { assignment: Assignment; onP
 }
 
 function Meta({ icon, text }: { icon: React.ComponentProps<typeof Ionicons>['name']; text: string }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <View style={styles.metaItem}>
       <Ionicons name={icon} size={14} color={colors.textDim} />
@@ -62,6 +66,8 @@ function Meta({ icon, text }: { icon: React.ComponentProps<typeof Ionicons>['nam
  * sabe que tiene un viaje vivo y llega a la ruta con un toque.
  */
 export function ActiveTripBanner() {
+  const styles = useStyles();
+  const { colors, elevation } = useTheme();
   const order = useTrip((s) => s.order);
   const phase = useTripPhase();
   if (!order || !phase) return null;
@@ -94,6 +100,8 @@ export function ActiveTripBanner() {
 
 /** Pasos del servicio: Recogida → Entrega → Evidencia. */
 export function StepIndicator({ steps, current }: { steps: string[]; current: number }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <View style={styles.steps}>
       {steps.map((label, i) => {
@@ -132,7 +140,8 @@ export function StepIndicator({ steps, current }: { steps: string[]; current: nu
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   code: { fontSize: 13, fontWeight: '600', color: colors.textDim, flexShrink: 1 },
   meta: {
@@ -156,7 +165,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   bannerTitle: { color: colors.white, fontSize: 15, fontWeight: '700' },
-  bannerSub: { color: '#DBE6FD', fontSize: 13, marginTop: 1 },
+  bannerSub: { color: colors.onPrimaryMuted, fontSize: 13, marginTop: 1 },
   bannerCta: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -182,4 +191,5 @@ const styles = StyleSheet.create({
   stepNum: { fontSize: 12, fontWeight: '700', color: colors.textDim },
   stepLabel: { fontSize: 12, color: colors.textDim },
   stepLine: { flex: 1, height: 2, backgroundColor: colors.border, marginBottom: 18 },
-});
+}),
+);

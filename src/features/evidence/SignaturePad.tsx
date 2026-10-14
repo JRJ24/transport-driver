@@ -1,7 +1,8 @@
 import React, { useMemo, useRef } from 'react';
 import { PanResponder, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { colors, radius } from '@/theme/theme';
+import { radius } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import type { Point, Stroke } from '@/store/evidence.store';
 
 export function strokesToPath(strokes: Stroke[]): string[] {
@@ -44,6 +45,8 @@ export function SignaturePad({
   onSize: (size: { width: number; height: number }) => void;
   height?: number;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   const size = useRef({ width: 320, height });
   const live = useRef<Stroke[]>(strokes);
   live.current = strokes;
@@ -93,7 +96,8 @@ export function SignaturePad({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   pad: {
     borderRadius: radius.md,
     borderWidth: 1.5,
@@ -110,4 +114,5 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: colors.border,
   },
-});
+}),
+);

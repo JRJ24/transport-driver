@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Button, ErrorBanner, Muted, TextField } from '@/components/ui';
-import { colors, radius, spacing, typography } from '@/theme/theme';
+import { radius, spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { useAuth } from '@/store/auth.store';
 
 export function LoginScreen() {
+  const styles = useStyles();
+  const { typography } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const login = useAuth((s) => s.login);
@@ -18,7 +20,6 @@ export function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.screen}>
-      <StatusBar style="dark" />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
           <Animated.View entering={FadeInDown.springify().damping(16)} style={styles.brand}>
@@ -68,11 +69,13 @@ export function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   inner: { flexGrow: 1, justifyContent: 'center', gap: spacing.xxl, padding: spacing.xl },
   brand: { gap: spacing.sm },
   logo: { width: 64, height: 64, borderRadius: radius.lg, marginBottom: spacing.sm },
   eyebrow: { color: colors.primary, fontSize: 13, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
   form: { gap: spacing.lg },
-});
+}),
+);

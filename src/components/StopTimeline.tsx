@@ -1,12 +1,13 @@
 import React from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing } from '@/theme/theme';
+import { spacing, type Palette } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import type { OrderStop } from '@/types/api';
 import { stopTypeLabels } from '@/constants/status.constants';
 import { haptic } from '@/utils/feedback';
 
-function stopColor(stop: OrderStop): string {
+function stopColor(stop: OrderStop, colors: Palette): string {
   return stop.stopType === 'PICKUP'
     ? colors.pickup
     : stop.stopType === 'DROPOFF'
@@ -27,12 +28,14 @@ export function StopTimeline({
   compact?: boolean;
   onNavigate?: (stop: OrderStop) => void;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <View>
       {stops.map((stop, i) => {
         const last = i === stops.length - 1;
         const done = Boolean(stop.completedAt);
-        const color = stopColor(stop);
+        const color = stopColor(stop, colors);
         return (
           <View key={stop.id} style={styles.row}>
             <View style={styles.rail}>
@@ -80,6 +83,8 @@ export function StopTimeline({
 }
 
 function Chip({ icon, label, onPress }: { icon: React.ComponentProps<typeof Ionicons>['name']; label: string; onPress: () => void }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -97,7 +102,8 @@ function Chip({ icon, label, onPress }: { icon: React.ComponentProps<typeof Ioni
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   row: { flexDirection: 'row', gap: spacing.md },
   rail: { width: 16, alignItems: 'center' },
   node: {
@@ -135,4 +141,5 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   chipText: { fontSize: 13, fontWeight: '600', color: colors.primaryText, flexShrink: 1 },
-});
+}),
+);

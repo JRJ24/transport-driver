@@ -3,7 +3,8 @@ import { StyleSheet, View } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
+import type { Palette } from '@/theme/theme';
 import { useAuth } from '@/store/auth.store';
 import { useTrip } from '@/store/trip.store';
 import { haptic } from '@/utils/feedback';
@@ -25,18 +26,21 @@ const RootStack = createNativeStackNavigator<RootStackParamList>();
 const InicioStack = createNativeStackNavigator<InicioStackParamList>();
 const Tabs = createBottomTabNavigator<TabParamList>();
 
-const stackOptions = {
+function stackOptions(colors: Palette) {
+  return {
   headerStyle: { backgroundColor: colors.bg },
   headerTintColor: colors.text,
   headerTitleStyle: { fontWeight: '700' as const, fontSize: 17 },
   headerShadowVisible: false,
   headerBackButtonDisplayMode: 'minimal' as const,
   contentStyle: { backgroundColor: colors.bg },
-};
+  };
+}
 
 function InicioNavigator() {
+  const { colors } = useTheme();
   return (
-    <InicioStack.Navigator screenOptions={stackOptions}>
+    <InicioStack.Navigator screenOptions={stackOptions(colors)}>
       <InicioStack.Screen name="Tasks" component={TasksScreen} options={{ headerShown: false }} />
       <InicioStack.Screen name="OrderDetail" component={OrderDetailScreen} options={{ title: 'Detalle de la orden' }} />
       <InicioStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notificaciones' }} />
@@ -53,6 +57,7 @@ function tabIcon(active: IoniconName, idle: IoniconName) {
 }
 
 function RouteTabIcon({ color, focused }: { color: string; focused: boolean }) {
+  const styles = useStyles();
   const live = useTrip((s) => Boolean(s.order));
   return (
     <View>
@@ -63,6 +68,7 @@ function RouteTabIcon({ color, focused }: { color: string; focused: boolean }) {
 }
 
 function MainTabs() {
+  const { colors } = useTheme();
   // Un push tocado en frio espera a que existan las pestañas.
   useEffect(() => {
     setMainReady(true);
@@ -93,6 +99,7 @@ function MainTabs() {
 }
 
 export function RootNavigator() {
+  const { colors } = useTheme();
   const status = useAuth((s) => s.status);
   const authenticated = status === 'authenticated';
 
@@ -111,7 +118,7 @@ export function RootNavigator() {
             component={TripCompletedScreen}
             options={{ presentation: 'fullScreenModal', animation: 'fade', gestureEnabled: false }}
           />
-          <RootStack.Group screenOptions={{ ...stackOptions, headerShown: true }}>
+          <RootStack.Group screenOptions={{ ...stackOptions(colors), headerShown: true }}>
             <RootStack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Editar perfil' }} />
             <RootStack.Screen name="ChangePassword" component={ChangePasswordScreen} options={{ title: 'Cambiar contraseña' }} />
             <RootStack.Screen name="ChangeEmail" component={ChangeEmailScreen} options={{ title: 'Cambiar correo' }} />
@@ -124,7 +131,8 @@ export function RootNavigator() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   liveDot: {
     position: 'absolute',
     top: -1,
@@ -136,4 +144,5 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.surface,
   },
-});
+}),
+);

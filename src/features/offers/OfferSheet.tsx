@@ -9,7 +9,8 @@ import { navigationRef } from '@/navigation/ref';
 import { useOffers } from '@/store/offers.store';
 import { useOrders } from '@/store/order.store';
 import { toast } from '@/store/toast.store';
-import { colors, radius, spacing, typography } from '@/theme/theme';
+import { radius, spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { haptic } from '@/utils/feedback';
 import { formatKm, formatMinutes, formatMoney } from '@/utils/format';
 import { sortedStops } from '@/utils/orders';
@@ -25,6 +26,8 @@ function secondsLeft(offer: DriverOffer, now: number): number {
  * y una barra que se vacia hasta que la oferta pasa al siguiente conductor.
  */
 export function OfferSheet() {
+  const styles = useStyles();
+  const { colors, typography } = useTheme();
   const insets = useSafeAreaInsets();
   const loadAssignments = useOrders((s) => s.loadAssignments);
   const offers = useOffers((s) => s.offers);
@@ -169,6 +172,8 @@ export function OfferSheet() {
 }
 
 function Fact({ icon, label, value }: { icon: React.ComponentProps<typeof Ionicons>['name']; label: string; value: string }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <View style={styles.fact}>
       <Ionicons name={icon} size={16} color={colors.textDim} />
@@ -180,7 +185,8 @@ function Fact({ icon, label, value }: { icon: React.ComponentProps<typeof Ionico
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },
   sheet: {
     gap: spacing.lg,
@@ -221,4 +227,5 @@ const styles = StyleSheet.create({
   factValue: { color: colors.text, fontWeight: '700', fontSize: 15, marginTop: 2 },
   factLabel: { color: colors.textDim, fontSize: 12 },
   actions: { flexDirection: 'row', gap: spacing.sm },
-});
+}),
+);

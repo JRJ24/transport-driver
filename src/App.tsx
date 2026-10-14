@@ -2,12 +2,14 @@ import 'react-native-gesture-handler';
 // Registers the background location task at module scope (required by Expo).
 import '@/services/location/background-location.task';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { DefaultTheme, NavigationContainer, type Theme } from '@react-navigation/native';
-import { colors } from '@/theme/theme';
+import { DarkTheme, DefaultTheme, NavigationContainer, type Theme } from '@react-navigation/native';
+import { StatusBar } from 'expo-status-bar';
+import type { Theme as AppTheme } from '@/theme/theme';
+import { useTheme, useThemeMode } from '@/theme/ThemeProvider';
 import { navigationRef, navigateToRoute } from '@/navigation/ref';
 import { RootNavigator } from '@/navigation/RootNavigator';
 import { useAuth } from '@/store/auth.store';
@@ -26,17 +28,20 @@ import { useOffers } from '@/store/offers.store';
 import { OfferSheet } from '@/features/offers/OfferSheet';
 import { ToastHost } from '@/components/ToastHost';
 
-const navTheme: Theme = {
-  ...DefaultTheme,
-  colors: {
-    ...DefaultTheme.colors,
-    background: colors.bg,
-    card: colors.surface,
-    text: colors.text,
-    border: colors.border,
-    primary: colors.primary,
-  },
-};
+function navThemeFor(theme: AppTheme): Theme {
+  const base = theme.isDark ? DarkTheme : DefaultTheme;
+  return {
+    ...base,
+    colors: {
+      ...base.colors,
+      background: theme.colors.bg,
+      card: theme.colors.surface,
+      text: theme.colors.text,
+      border: theme.colors.border,
+      primary: theme.colors.primary,
+    },
+  };
+}
 
 function AppRoot() {
   const status = useAuth((s) => s.status);
@@ -165,9 +170,21 @@ function AppRoot() {
 }
 
 export default function App() {
+  const theme = useTheme();
+  const themeReady = useThemeMode((m) => m.hydrated);
+  const navTheme = useMemo(() => navThemeFor(theme), [theme]);
+
+  useEffect(() => {
+    void useThemeMode.getState().hydrate();
+  }, []);
+
+  // Un instante hasta leer la preferencia: evita un destello del tema equivocado.
+  if (!themeReady) return null;
+
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <SafeAreaProvider>
+        <StatusBar style={theme.isDark ? 'light' : 'dark'} />
         <NavigationContainer ref={navigationRef} theme={navTheme}>
           <AppRoot />
         </NavigationContainer>

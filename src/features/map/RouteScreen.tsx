@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { useIsFocused } from '@react-navigation/native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,7 +10,8 @@ import { Badge, Button, EmptyState, IconButton, Muted } from '@/components/ui';
 import { SwipeButton } from '@/components/SwipeButton';
 import { ActionSheet } from '@/components/Sheet';
 import { StepIndicator } from '@/components/OrderCard';
-import { colors, elevation, radius, spacing } from '@/theme/theme';
+import { radius, spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { incidentsApi } from '@/api/incidents.api';
 import { useTrip } from '@/store/trip.store';
 import { useTracking } from '@/store/tracking.store';
@@ -26,7 +26,7 @@ import { googleMapsNavigationUrl, wazeNavigationUrl } from '@/utils/navigation';
 import { dropoffStop, phaseCopy, pickupStop, sortedStops, stopAddress, targetStopFor } from '@/utils/orders';
 import { useLiveLocation } from './useLiveLocation';
 import { useTripNavigation } from './useTripNavigation';
-import { lightMapStyle } from './mapStyle';
+import { darkMapStyle, lightMapStyle } from './mapStyle';
 import { goToTab, openEvidence } from '@/navigation/ref';
 
 const DEFAULT_REGION = { latitude: 18.4861, longitude: -69.9312, latitudeDelta: 0.08, longitudeDelta: 0.08 };
@@ -57,6 +57,8 @@ function useSettled(deps: unknown[]): boolean {
 }
 
 export function RouteScreen() {
+  const styles = useStyles();
+  const { colors, elevation, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const focused = useIsFocused();
   const mapRef = useRef<MapView>(null);
@@ -129,7 +131,6 @@ export function RouteScreen() {
   if (!order || !nav || !phase) {
     return (
       <View style={[styles.screen, { paddingTop: insets.top }]}>
-        <StatusBar style="dark" />
         <EmptyState
           icon="navigate-circle-outline"
           title="Sin servicio en curso"
@@ -222,13 +223,12 @@ export function RouteScreen() {
 
   return (
     <View style={styles.screen}>
-      <StatusBar style="dark" />
       <KeepAwake />
       <MapView
         ref={mapRef}
         provider={PROVIDER_GOOGLE}
         style={StyleSheet.absoluteFill}
-        customMapStyle={lightMapStyle}
+        customMapStyle={isDark ? darkMapStyle : lightMapStyle}
         initialRegion={{ ...initial, latitudeDelta: 0.04, longitudeDelta: 0.04 }}
         showsUserLocation={false}
         showsMyLocationButton={false}
@@ -440,6 +440,8 @@ export function RouteScreen() {
 }
 
 function Pin({ color, icon, done }: { color: string; icon: React.ComponentProps<typeof Ionicons>['name']; done?: boolean }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <View style={{ alignItems: 'center' }}>
       <View style={[styles.pin, { backgroundColor: done ? colors.textDim : color }]}>
@@ -450,7 +452,8 @@ function Pin({ color, icon, done }: { color: string; icon: React.ComponentProps<
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   topCard: {
     position: 'absolute',
@@ -541,4 +544,5 @@ const styles = StyleSheet.create({
     borderRightColor: 'transparent',
     marginTop: -2,
   },
-});
+}),
+);

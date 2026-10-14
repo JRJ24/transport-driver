@@ -11,7 +11,8 @@ import Animated, {
   Extrapolation,
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, elevation, radius } from '@/theme/theme';
+import { radius } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { haptic } from '@/utils/feedback';
 import type { IconName } from './ui';
 
@@ -20,11 +21,6 @@ const PAD = 4;
 
 type SwipeTone = 'primary' | 'success' | 'warning';
 
-const toneBg: Record<SwipeTone, string> = {
-  primary: colors.primary,
-  success: colors.success,
-  warning: colors.warning,
-};
 
 /**
  * «Desliza para…»: confirma acciones importantes con un gesto deliberado,
@@ -45,6 +41,8 @@ export function SwipeButton({
   loading?: boolean;
   disabled?: boolean;
 }) {
+  const styles = useStyles();
+  const { colors, elevation } = useTheme();
   const [width, setWidth] = useState(0);
   const x = useSharedValue(0);
   const max = Math.max(0, width - KNOB - PAD * 2);
@@ -83,7 +81,7 @@ export function SwipeButton({
   }));
   const fillStyle = useAnimatedStyle(() => ({ width: x.value + KNOB + PAD }));
 
-  const bg = toneBg[tone];
+  const bg = { primary: colors.primary, success: colors.success, warning: colors.warning }[tone];
 
   return (
     <View
@@ -115,7 +113,8 @@ export function SwipeButton({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   track: {
     height: KNOB + PAD * 2,
     borderRadius: radius.pill,
@@ -142,4 +141,5 @@ const styles = StyleSheet.create({
   },
   chevrons: { position: 'absolute', right: 16 },
   chevronText: { fontSize: 22, fontWeight: '700', letterSpacing: -2 },
-});
+}),
+);

@@ -10,7 +10,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as ImagePicker from 'expo-image-picker';
@@ -22,7 +21,8 @@ import Animated, { FadeIn, SlideInRight } from 'react-native-reanimated';
 import { Button, Card, IconButton, KeyValue, Muted, TextField } from '@/components/ui';
 import { SwipeButton } from '@/components/SwipeButton';
 import { StepIndicator } from '@/components/OrderCard';
-import { colors, radius, spacing, typography } from '@/theme/theme';
+import { radius, spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { attachmentsApi } from '@/api/attachments.api';
 import { deliveryProofsApi } from '@/api/delivery-proofs.api';
 import { useEvidence, type Stroke } from '@/store/evidence.store';
@@ -47,6 +47,8 @@ const STEPS = ['Receptor', 'Foto', 'Firma', 'Confirmar'];
  * confirmar. «Completar entrega» solo existe al final de este flujo.
  */
 export function EvidenceScreen() {
+  const styles = useStyles();
+  const { colors, typography } = useTheme();
   const navigation = useNavigation<Nav>();
   const { orderId } = useRoute<RouteProp<RootStackParamList, 'Evidence'>>().params;
   const order = useTrip((s) => (s.order?.id === orderId ? s.order : null));
@@ -201,7 +203,6 @@ export function EvidenceScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <StatusBar style="dark" />
       <View style={styles.header}>
         <IconButton icon="close" accessibilityLabel="Cerrar" onPress={() => navigation.goBack()} size={40} />
         <View style={{ flex: 1 }}>
@@ -356,6 +357,8 @@ export function EvidenceScreen() {
 }
 
 function StepTitle({ icon, title, subtitle }: { icon: React.ComponentProps<typeof Ionicons>['name']; title: string; subtitle: string }) {
+  const styles = useStyles();
+  const { colors, typography } = useTheme();
   return (
     <View style={{ gap: 4 }}>
       <View style={styles.stepIcon}>
@@ -368,6 +371,7 @@ function StepTitle({ icon, title, subtitle }: { icon: React.ComponentProps<typeo
 }
 
 function Check({ ok, label }: { ok: boolean; label: string }) {
+  const { colors } = useTheme();
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       <Ionicons name={ok ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={ok ? colors.success : colors.textDim} />
@@ -403,7 +407,8 @@ async function resolveLocation(lastFix: LatLng | null, fallback: LatLng | null):
   throw new Error('No hay ubicación disponible para la evidencia.');
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
   title: { fontSize: 18, fontWeight: '700', color: colors.text },
@@ -463,4 +468,5 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
   },
   footerRow: { flexDirection: 'row', gap: spacing.sm },
-});
+}),
+);

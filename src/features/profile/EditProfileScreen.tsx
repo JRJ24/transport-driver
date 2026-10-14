@@ -3,7 +3,8 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 're
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Avatar, Button, Muted, TextField } from '@/components/ui';
-import { colors, spacing } from '@/theme/theme';
+import { spacing } from '@/theme/theme';
+import { makeStyles } from '@/theme/ThemeProvider';
 import { usersApi } from '@/api/users.api';
 import { useAuth } from '@/store/auth.store';
 import { toast } from '@/store/toast.store';
@@ -13,6 +14,7 @@ import { useAvatarPicker } from './useAvatarPicker';
 const PHONE = /^\+?[0-9]{10,15}$/;
 
 export function EditProfileScreen() {
+  const styles = useStyles();
   const navigation = useNavigation();
   const user = useAuth((s) => s.user);
   const applyProfile = useAuth((s) => s.applyProfile);
@@ -82,9 +84,11 @@ export function EditProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, gap: spacing.lg },
   avatar: { alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
   footer: { padding: spacing.lg },
-});
+}),
+);

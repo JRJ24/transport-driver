@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, {
@@ -13,13 +12,16 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { Button, Muted } from '@/components/ui';
-import { colors, radius, spacing, typography } from '@/theme/theme';
+import { radius, spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { haptic } from '@/utils/feedback';
 import { formatMoney, formatTime } from '@/utils/format';
 import type { RootStackParamList } from '@/navigation/types';
 
 /** Cierre con celebracion: el conductor sabe sin dudas que termino bien. */
 export function TripCompletedScreen() {
+  const styles = useStyles();
+  const { colors, typography } = useTheme();
   const navigation = useNavigation();
   const { orderCode, amount, recipient } = useRoute<RouteProp<RootStackParamList, 'TripCompleted'>>().params;
   const scale = useSharedValue(0);
@@ -36,7 +38,6 @@ export function TripCompletedScreen() {
 
   return (
     <SafeAreaView style={styles.screen}>
-      <StatusBar style="dark" />
       <View style={styles.center}>
         <Animated.View style={[styles.ring, badge]}>
           <View style={styles.check}>
@@ -67,7 +68,8 @@ export function TripCompletedScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.lg, padding: spacing.xl },
   ring: {
@@ -97,4 +99,5 @@ const styles = StyleSheet.create({
   amountLabel: { fontSize: 13, color: colors.textMuted },
   amountValue: { fontSize: 24, fontWeight: '700', color: colors.text },
   footer: { padding: spacing.lg, gap: spacing.md },
-});
+}),
+);

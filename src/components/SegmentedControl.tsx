@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
-import { colors, elevation, radius } from '@/theme/theme';
+import { radius } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { haptic } from '@/utils/feedback';
 
 export interface Segment<K extends string> {
@@ -20,6 +21,8 @@ export function SegmentedControl<K extends string>({
   value: K;
   onChange: (key: K) => void;
 }) {
+  const styles = useStyles();
+  const { elevation } = useTheme();
   const [width, setWidth] = useState(0);
   const index = Math.max(0, segments.findIndex((s) => s.key === value));
   const segWidth = width / Math.max(1, segments.length);
@@ -64,7 +67,8 @@ export function SegmentedControl<K extends string>({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   track: {
     flexDirection: 'row',
     backgroundColor: colors.surfaceMuted,
@@ -102,4 +106,5 @@ const styles = StyleSheet.create({
   countActive: { backgroundColor: colors.primary },
   countText: { fontSize: 11, fontWeight: '700', color: colors.textMuted },
   countTextActive: { color: colors.white },
-});
+}),
+);

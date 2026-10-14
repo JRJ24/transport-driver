@@ -3,7 +3,8 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 're
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Button, Muted, TextField } from '@/components/ui';
-import { colors, spacing } from '@/theme/theme';
+import { spacing } from '@/theme/theme';
+import { makeStyles } from '@/theme/ThemeProvider';
 import { usersApi } from '@/api/users.api';
 import { toast } from '@/store/toast.store';
 import { friendlyError } from '@/utils/errors';
@@ -16,6 +17,7 @@ function passwordIssue(value: string): string | null {
 }
 
 export function ChangePasswordScreen() {
+  const styles = useStyles();
   const navigation = useNavigation();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
@@ -58,8 +60,10 @@ export function ChangePasswordScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, gap: spacing.lg },
   footer: { padding: spacing.lg },
-});
+}),
+);

@@ -3,7 +3,8 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } fr
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Button, Muted, TextField } from '@/components/ui';
-import { colors, spacing, typography } from '@/theme/theme';
+import { spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { usersApi } from '@/api/users.api';
 import { useAuth } from '@/store/auth.store';
 import { toast } from '@/store/toast.store';
@@ -13,6 +14,8 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 /** Dos pasos: correo nuevo + contraseña → codigo de 6 digitos. */
 export function ChangeEmailScreen() {
+  const styles = useStyles();
+  const { typography } = useTheme();
   const navigation = useNavigation();
   const user = useAuth((s) => s.user);
   const refreshProfile = useAuth((s) => s.refreshProfile);
@@ -122,8 +125,10 @@ export function ChangeEmailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, gap: spacing.lg },
   footer: { padding: spacing.lg },
-});
+}),
+);

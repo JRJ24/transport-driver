@@ -8,7 +8,8 @@ import { StopTimeline } from '@/components/StopTimeline';
 import { SwipeButton } from '@/components/SwipeButton';
 import { ActionSheet, ConfirmSheet } from '@/components/Sheet';
 import { assignmentBadge } from '@/components/OrderCard';
-import { colors, elevation, radius, spacing, typography } from '@/theme/theme';
+import { radius, spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { ordersApi } from '@/api/orders.api';
 import { driversApi } from '@/api/drivers.api';
 import { useOrders } from '@/store/order.store';
@@ -52,6 +53,8 @@ function useOrderDetail(orderId: string) {
 }
 
 export function OrderDetailScreen() {
+  const styles = useStyles();
+  const { colors, typography, elevation } = useTheme();
   const route = useRoute<RouteProp<InicioStackParamList, 'OrderDetail'>>();
   const navigation = useNavigation();
   const { orderId } = route.params;
@@ -272,6 +275,8 @@ export function OrderDetailScreen() {
 }
 
 function Metric({ icon, value, label }: { icon: React.ComponentProps<typeof Ionicons>['name']; value: string; label: string }) {
+  const styles = useStyles();
+  const { colors, elevation } = useTheme();
   return (
     <View style={[styles.metric, elevation.card]}>
       <Ionicons name={icon} size={18} color={colors.primary} />
@@ -283,7 +288,8 @@ function Metric({ icon, value, label }: { icon: React.ComponentProps<typeof Ioni
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, gap: spacing.lg, paddingBottom: 140 },
   header: { gap: spacing.sm },
@@ -332,4 +338,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.warningSoft,
   },
   blockedText: { flex: 1, color: colors.warningText, fontSize: 14, fontWeight: '500' },
-});
+}),
+);

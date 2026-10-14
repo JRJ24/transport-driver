@@ -3,19 +3,24 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInUp, FadeOutUp, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, elevation, radius, spacing } from '@/theme/theme';
+import { radius, spacing, type Palette } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { useToast, type ToastTone } from '@/store/toast.store';
 import type { IconName } from './ui';
 
-const toneStyle: Record<ToastTone, { icon: IconName; color: string; bg: string }> = {
+function toneStyle(colors: Palette): Record<ToastTone, { icon: IconName; color: string; bg: string }> {
+  return {
   success: { icon: 'checkmark-circle', color: colors.success, bg: colors.successSoft },
   info: { icon: 'information-circle', color: colors.primary, bg: colors.primarySoft },
   warning: { icon: 'alert-circle', color: colors.warning, bg: colors.warningSoft },
   danger: { icon: 'close-circle', color: colors.danger, bg: colors.dangerSoft },
-};
+  };
+}
 
 /** Avisos flotantes arriba de todo: confirman cada accion sin bloquear. */
 export function ToastHost() {
+  const styles = useStyles();
+  const { colors, elevation } = useTheme();
   const toasts = useToast((s) => s.toasts);
   const dismiss = useToast((s) => s.dismiss);
   const insets = useSafeAreaInsets();
@@ -23,7 +28,7 @@ export function ToastHost() {
   return (
     <View pointerEvents="box-none" style={[styles.host, { top: insets.top + spacing.sm }]}>
       {toasts.map((t) => {
-        const s = toneStyle[t.tone];
+        const s = toneStyle(colors)[t.tone];
         return (
           <Animated.View
             key={t.id}
@@ -68,7 +73,8 @@ export function ToastHost() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   host: { position: 'absolute', left: spacing.lg, right: spacing.lg, gap: spacing.sm, zIndex: 1000 },
   toast: {
     flexDirection: 'row',
@@ -82,4 +88,5 @@ const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: 15, fontWeight: '700' },
   message: { color: colors.textMuted, fontSize: 13, marginTop: 2, lineHeight: 18 },
   action: { fontSize: 14, fontWeight: '700' },
-});
+}),
+);

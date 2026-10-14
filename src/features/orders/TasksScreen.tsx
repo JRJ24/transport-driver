@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'expo-status-bar';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -9,7 +8,8 @@ import { Avatar, Badge, EmptyState, ErrorBanner, IconButton, Muted, Skeleton, ty
 import { goToTab } from '@/navigation/ref';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { ActiveTripBanner, OrderCard } from '@/components/OrderCard';
-import { colors, spacing, typography } from '@/theme/theme';
+import { spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { useOrders } from '@/store/order.store';
 import { useNotifications } from '@/store/notifications.store';
 import { useAuth } from '@/store/auth.store';
@@ -41,6 +41,8 @@ const EMPTY: Record<OrderBucket, { icon: IconName; title: string; message: strin
 };
 
 export function TasksScreen() {
+  const styles = useStyles();
+  const { colors } = useTheme();
   const navigation = useNavigation<Nav>();
   const assignments = useOrders((s) => s.assignments);
   const loaded = useOrders((s) => s.loaded);
@@ -117,7 +119,6 @@ export function TasksScreen() {
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
-      <StatusBar style="dark" />
       <FlatList<Assignment>
         data={loaded ? data : []}
         keyExtractor={(a) => a.id}
@@ -159,7 +160,8 @@ function Separator() {
   return <View style={{ height: spacing.md }} />;
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.lg, paddingBottom: spacing.xxxl },
   headerBlock: { gap: spacing.lg, marginBottom: spacing.lg },
@@ -172,4 +174,5 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.md,
   },
-});
+}),
+);

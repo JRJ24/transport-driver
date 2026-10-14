@@ -2,7 +2,8 @@ import React, { type ReactNode } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, radius, spacing } from '@/theme/theme';
+import { radius, spacing } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/ThemeProvider';
 import { haptic } from '@/utils/feedback';
 import { Button, type IconName } from './ui';
 
@@ -23,6 +24,7 @@ export function Sheet({
   subtitle?: string;
   children: ReactNode;
 }) {
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
@@ -62,6 +64,8 @@ export function ActionSheet({
   options: SheetOption[];
   onSelect: (key: string) => void;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <Sheet visible={visible} onClose={onClose} title={title} subtitle={subtitle}>
       <View style={{ gap: spacing.sm }}>
@@ -113,6 +117,8 @@ export function ConfirmSheet({
   danger?: boolean;
   icon?: IconName;
 }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
   return (
     <Sheet visible={visible} onClose={onClose}>
       <View style={{ alignItems: 'center', gap: spacing.sm }}>
@@ -137,7 +143,8 @@ export function ConfirmSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, typography, elevation }) =>
+  StyleSheet.create({
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },
   sheet: {
     backgroundColor: colors.surface,
@@ -170,4 +177,5 @@ const styles = StyleSheet.create({
   optionLabel: { fontSize: 15, fontWeight: '600', color: colors.text },
   optionDesc: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
   confirmIcon: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center' },
-});
+}),
+);
